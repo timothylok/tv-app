@@ -95,13 +95,24 @@ def main(argv=None):
     rows = [r for r in usage._rows() if r.get("at", 0) > now - usage.WINDOW_S]
     ai = {"neurons_24h": round(spent, 1), "calls_24h": len(rows),
           "budget": usage.DEFAULT_BUDGET, "pct": round(spent / usage.DEFAULT_BUDGET * 100, 2)}
+    theirs = usage.provider_24h(now)  # Cloudflare account-wide (includes other projects); None = no token
+    if theirs is not None:
+        ai["cloudflare_24h"] = round(theirs, 1)
+        ai["cloudflare_pct"] = round(theirs / usage.DEFAULT_BUDGET * 100, 2)
     auditlog.event("ai", event="daily-summary", **ai)
 
     log("housekeeping", f"R2: {size / 1024 ** 2:.1f} MB ({r2['storage_pct']}% of 10 GB), "
                         f"{a} Class A ops this month ({r2['class_a_pct']}% of 1M)")
     log("housekeeping", f"AI: {spent:.0f} neurons in 24 h ({ai['pct']}% of {usage.DEFAULT_BUDGET})")
+    if theirs is None:
+        log("housekeeping", "Cloudflare account-wide AI figure: not available (no analytics token or "
+                            "analytics error); ledger only")
+    else:
+        log("housekeeping", f"Cloudflare account-wide AI (all projects): {theirs:.0f} neurons in 24 h "
+                            f"({ai['cloudflare_pct']}% of {usage.DEFAULT_BUDGET})")
     for label, pct in (("R2 storage", r2["storage_pct"]), ("R2 Class A", r2["class_a_pct"]),
-                       ("Workers AI", ai["pct"])):
+                       ("Workers AI (ours)", ai["pct"]),
+                       ("Workers AI (account-wide)", ai.get("cloudflare_pct", 0))):
         if pct > WARN_AT * 100:
             print(f"::warning::{label} is at {pct}% of its free tier")
 
