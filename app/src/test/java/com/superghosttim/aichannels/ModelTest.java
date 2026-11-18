@@ -87,4 +87,26 @@ public class ModelTest {
         assertEquals(ServerClock.parseDate("Wed, 18 Nov 2026 07:49:54 GMT") + 30_500, k.now(1000));
         assertNotNull(k);
     }
+
+    @Test public void statusFieldsParseAndDefault() {
+        ScheduleModel s = ScheduleModel.parse("{\"updated\":1795028655550,\"ai\":{\"left_pct\":94},\"items\":["
+                + "{\"id\":\"a\",\"url\":\"https://x.test/a.mp4\",\"start\":1000,\"end\":2000}]}");
+        assertEquals(1795028655550L, s.updated());
+        assertEquals(94, s.aiLeftPct());
+        assertEquals("a", s.lastStartedBy(5000).id);
+        assertNull(s.lastStartedBy(999));
+        ScheduleModel old = ScheduleModel.parse(SCHED);   // old schedules have neither field
+        assertEquals(0, old.updated());
+        assertEquals(-1, old.aiLeftPct());
+        assertEquals(-1, ScheduleModel.parse("{\"ai\":{\"left_pct\":250},\"items\":[]}").aiLeftPct());
+    }
+
+    @Test public void statusLineUsesNewZealandTime() {
+        // 2026-11-18 19:04 UTC = 19 Nov 08:04 NZDT (UTC+13); 2026-07-01 00:00 UTC = 12:00 pm NZST (UTC+12)
+        assertEquals("19 Nov 2026, 8:04 am NZDT", StatusFormat.nz(1795028655550L));
+        assertEquals("1 Jul 2026, 12:00 pm NZST", StatusFormat.nz(1782864000000L));
+        assertEquals("Updated 19 Nov 2026, 8:04 am NZDT  |  Episode 20261118-1902  |  AI free left 94%",
+                StatusFormat.line(1795028655550L, "20261118-1902", 94));
+        assertEquals("Updated: unknown  |  AI free left unknown", StatusFormat.line(0, null, -1));
+    }
 }

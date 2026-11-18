@@ -20,20 +20,32 @@ public final class ScheduleModel {
 
     private final List<Item> items;
     private final String filler;   // https URL of the looping ident, or null
+    private final long updated;    // when the pipeline last wrote this schedule (epoch ms), 0 = unknown
+    private final int aiLeftPct;   // free Workers AI allowance left (0-100), -1 = unknown
 
-    private ScheduleModel(List<Item> items, String filler) { this.items = items; this.filler = filler; }
+    private ScheduleModel(List<Item> items, String filler, long updated, int aiLeftPct) {
+        this.items = items; this.filler = filler; this.updated = updated; this.aiLeftPct = aiLeftPct;
+    }
 
-    public static ScheduleModel empty() { return new ScheduleModel(new ArrayList<Item>(), null); }
+    public static ScheduleModel empty() { return new ScheduleModel(new ArrayList<Item>(), null, 0, -1); }
 
     public static boolean isHttps(String u) { return u != null && u.startsWith("https://") && u.length() > 10; }
 
     public static ScheduleModel parse(String json) {
         List<Item> out = new ArrayList<>();
         String filler = null;
+        long updated = 0;
+        int aiLeft = -1;
         try {
             JSONObject root = new JSONObject(json);
             String f = root.optString("filler", "");
             if (isHttps(f)) filler = f;
+            updated = Math.max(0, root.optLong("updated", 0));
+            JSONObject ai = root.optJSONObject("ai");
+            if (ai != null) {
+                int p = ai.optInt("left_pct", -1);
+                if (p >= 0 && p <= 100) aiLeft = p;
+            }
             JSONArray arr = root.optJSONArray("items");
             for (int i = 0; arr != null && i < arr.length(); i++) {
                 JSONObject o = arr.optJSONObject(i);
@@ -50,10 +62,21 @@ public final class ScheduleModel {
         Collections.sort(out, new Comparator<Item>() {
             @Override public int compare(Item a, Item b) { return Long.compare(a.start, b.start); }
         });
-        return new ScheduleModel(out, filler);
+        return new ScheduleModel(out, filler, updated, aiLeft);
     }
 
     public String filler() { return filler; }
+
+    public long updated() { return updated; }
+
+    public int aiLeftPct() { return aiLeftPct; }
+
+    /** The most recent item that has started by `now` (on air or already finished), or null. */
+    public Item lastStartedBy(long now) {
+        Item hit = null;
+        for (Item it : items) if (it.start <= now) hit = it;
+        return hit;
+    }
 
     public int size() { return items.size(); }
 

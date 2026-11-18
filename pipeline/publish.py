@@ -131,6 +131,20 @@ def prune_items(items, now_ms):
     return ([i for i in items if i["end"] >= cutoff], [i for i in items if i["end"] < cutoff])
 
 
+def ai_status(channel):
+    """Free Workers AI allowance left, for the TV banner: account-wide (the larger of our ledger and
+    Cloudflare's figure), as a share of the daily budget. Failure to measure is reported, never hidden."""
+    import usage as ai_usage
+    try:
+        budget = float(channel.get("llm", {}).get("daily_neuron_budget", ai_usage.DEFAULT_BUDGET))
+        used = ai_usage.used_effective()
+        return {"used": round(used), "budget": round(budget),
+                "left_pct": max(0, min(100, round((1 - used / budget) * 100)))}
+    except Exception as e:  # noqa: BLE001
+        log("publish", f"WARNING could not compute AI status: {e}")
+        return None
+
+
 def publish_episode(channel, ep_id, title, mp4_path, work, now=None):
     """Upload one episode and append it to the schedule. Returns the schedule item."""
     pub = Publisher()
@@ -158,7 +172,7 @@ def publish_episode(channel, ep_id, title, mp4_path, work, now=None):
 
     items, old = prune_items(items, now_ms)
     sched = {"channel": cid, "name": channel["name"], "filler": filler,
-             "updated": now_ms, "items": items}
+             "updated": now_ms, "items": items, "ai": ai_status(channel)}
     pub.put_json(skey, sched)
     log("publish", f"schedule: {len(items)} items, new one starts in "
                    f"{(start - now_ms) // 1000}s")

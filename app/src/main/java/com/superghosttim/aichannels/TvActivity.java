@@ -67,7 +67,7 @@ public class TvActivity extends Activity {
     private long retryAt = 0;            // after a player error, wait before reloading
     private boolean started = false;
 
-    private TextView osdNumber, status, bannerChannel, bannerNow, bannerNext;
+    private TextView osdNumber, status, bannerChannel, bannerNow, bannerNext, bannerStatus;
     private View banner;
     private ListView list;
     private final StringBuilder digits = new StringBuilder();
@@ -179,6 +179,9 @@ public class TvActivity extends Activity {
         bl.addView(bannerChannel);
         bl.addView(bannerNow);
         bl.addView(bannerNext);
+        bannerStatus = text(0.03f, false);
+        bannerStatus.setTextColor(0xFF8FA3C7);
+        bl.addView(bannerStatus);
         bl.setVisibility(View.GONE);
         banner = bl;
         FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
@@ -237,6 +240,8 @@ public class TvActivity extends Activity {
                 : "Next episode coming up shortly");
         bannerNext.setText(next != null ? "Next: " + next.title + "  at " + tf.format(new Date(next.start)) : "");
         bannerNext.setVisibility(next != null ? View.VISIBLE : View.GONE);
+        ScheduleModel.Item last = s == null ? null : s.lastStartedBy(now);
+        bannerStatus.setText(s == null ? "" : StatusFormat.line(s.updated(), last == null ? null : last.id, s.aiLeftPct()));
         banner.setVisibility(View.VISIBLE);
         osdNumber.setText(String.valueOf(ch.number));
         osdNumber.setVisibility(View.VISIBLE);

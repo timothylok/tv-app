@@ -161,7 +161,7 @@ On launch it fetches `channels.json`, then the channel's schedule. "Now" is the 
 `Date` header, not the box's clock, so every TV shows the same moment. It plays the item with
 `start <= now < end`, seeking to the right offset, and loops the filler in gaps. It re-syncs every
 2 seconds, re-fetches the schedule every 60 seconds, and queues the next episode for a seamless
-switch when it follows straight on. Keys: channel up/down, number keys, OK for the now/next
+switch when it follows straight on. The OK banner also shows the schedule's `updated` time in NZ time, the latest episode id and `ai.left_pct` (free Workers AI left, account-wide, written at each publish; shows "unknown" on schedules published before this field existed). Keys: channel up/down, number keys, OK for the now/next
 banner, Back for the channel list. See `usermanual.md`.
 
 ## 10. Secrets and where they live
