@@ -1,0 +1,5 @@
+feedparser
+pyyaml
+requests
+edge-tts
+boto3

@@ -1,0 +1,14 @@
+name = "ai-tv-scheduler"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+workers_dev = false      # no public URL: this Worker only runs on its cron trigger
+preview_urls = false
+
+[vars]
+REPO = "timothylok/tv-app"
+WORKFLOW = "ai-news.yml"
+BRANCH = "main"
+
+# UTC. 19:00, 01:00, 07:00 = 8am, 2pm, 8pm New Zealand summer time. Change to taste.
+[triggers]
+crons = ["0 19,1,7 * * *"]

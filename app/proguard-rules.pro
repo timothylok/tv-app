@@ -1,0 +1,4 @@
+-keep class com.superghosttim.aichannels.TvActivity { *; }
+-keep class com.superghosttim.aichannels.KeepAliveService { *; }
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

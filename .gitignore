@@ -1,0 +1,21 @@
+out/
+.env
+*.mp4
+*.mp3
+*.wav
+__pycache__/
+.venv/
+state/
+# Android
+app/build/
+app/.gradle/
+.gradle/
+local.properties
+keystore.properties
+*.jks
+*.keystore
+.env.*
+!.env.example
+/build/
+.wrangler/
+node_modules/

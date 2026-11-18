@@ -1,0 +1,28 @@
+# AI News TV channel definition. A new channel = a new YAML file like this one.
+id: ai-news
+number: 1
+name: AI News TV
+episode_minutes: 4
+episodes_per_run: 2
+# Anthropic has no public RSS (404); TechCrunch / The Verge cover it. Verified 2026-11-18.
+max_per_source: 3        # keeps one chatty feed from filling the whole episode
+feeds:
+  - {name: OpenAI, url: "https://openai.com/news/rss.xml"}
+  - {name: Google, url: "https://blog.google/technology/ai/rss/"}
+  - {name: Google DeepMind, url: "https://deepmind.google/blog/rss.xml"}
+  - {name: Microsoft, url: "https://blogs.microsoft.com/feed/"}
+  - {name: Hugging Face, url: "https://huggingface.co/blog/feed.xml"}
+  - {name: TechCrunch, url: "https://techcrunch.com/category/artificial-intelligence/feed/"}
+  - {name: The Verge, url: "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"}
+llm:
+  provider: workers-ai        # ollama (local, now) | gemini | groq | workers-ai (cloud, later)
+  model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"   # Workers AI free tier; local alt: provider ollama, model gemma3:4b
+tts:
+  provider: edge          # edge | piper | paid
+  fallback: piper         # must run on a CPU-only CI runner
+  voice: en-NZ-MitchellNeural
+style:
+  background: "#0b1220"
+  accent: "#3b82f6"
+  width: 1280
+  height: 720
