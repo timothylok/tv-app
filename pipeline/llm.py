@@ -37,6 +37,8 @@ def _workers_ai(cfg, system, prompt):
     if not token or not account:
         raise RuntimeError("workers-ai needs CLOUDFLARE_API_TOKEN (and an account id)")
     model = cfg.get("model", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    import usage
+    usage.check(cfg)  # raises BudgetExceeded close to the free daily limit
     body = {
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": prompt}],
@@ -49,7 +51,9 @@ def _workers_ai(cfg, system, prompt):
         headers={"Authorization": f"Bearer {token}"}, json=body, timeout=cfg.get("timeout", 120))
     if r.status_code != 200:  # never echo headers; the body holds Cloudflare's error text only
         raise RuntimeError(f"workers-ai HTTP {r.status_code}: {r.text[:300]}")
-    out = r.json().get("result", {}).get("response")
+    result = r.json().get("result", {})
+    usage.record(model, result.get("usage"))  # billed whether or not the JSON parses
+    out = result.get("response")
     return out if isinstance(out, dict) else _parse_json(str(out))
 
 

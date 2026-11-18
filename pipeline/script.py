@@ -3,6 +3,7 @@ import time
 
 from common import clean_text, log
 from llm import generate_json
+from usage import BudgetExceeded
 
 WORDS_PER_MIN = 150
 MAX_SEGMENTS = 8
@@ -52,6 +53,8 @@ def build_script(channel, stories):
             raw = generate_json(channel["llm"], SYSTEM,
                                 _prompt(channel, stories, n_segments, words_each))
             result = _clean_segments(raw, stories)
+        except BudgetExceeded:
+            raise  # retrying cannot help
         except Exception as e:  # bad JSON, timeout, connection: try again
             log("script", f"attempt {attempt} failed: {e}")
             continue

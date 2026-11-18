@@ -14,6 +14,7 @@ import time
 from common import OUT_DIR, load_channel, log, save_json
 from ingest import fetch_stories, mark_seen
 from script import build_script
+from usage import BudgetExceeded
 
 
 def main(argv=None):
@@ -35,7 +36,19 @@ def main(argv=None):
         from publish import pull_state
         pull_state()
     stories = fetch_stories(channel)
-    script = build_script(channel, stories)
+    try:
+        script = build_script(channel, stories)
+    except BudgetExceeded as e:
+        # not a failure: stop quietly, keep the ledger, publish nothing this time
+        print(f"::warning::{e}")  # shows as a warning on the GitHub run
+        log("run", str(e))
+        if publishing:
+            from publish import push_state
+            push_state()
+        return 0
+    if publishing:  # save the spend now: a later TTS or render failure must not lose it
+        from publish import push_state
+        push_state()
     if args.dry_run:
         print(json.dumps(script, indent=2, ensure_ascii=False))
         return 0

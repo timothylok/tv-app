@@ -133,6 +133,7 @@ def update_channels(pub, channel, schedule_key):
 
 
 STATE_KEY = "state/seen.json"
+USAGE_KEY = "state/ai-usage.json"
 
 
 def pull_state():
@@ -142,8 +143,13 @@ def pull_state():
     if isinstance(data, list):
         save_json(STATE_DIR / "seen.json", data)
         log("publish", f"state: {len(data)} seen stories")
+    usage = Publisher().get_json(USAGE_KEY, None)
+    if isinstance(usage, list):
+        save_json(STATE_DIR / "ai-usage.json", usage)
 
 
 def push_state():
     from common import STATE_DIR, load_json
-    Publisher().put_json(STATE_KEY, load_json(STATE_DIR / "seen.json", []))
+    pub = Publisher()
+    pub.put_json(STATE_KEY, load_json(STATE_DIR / "seen.json", []))
+    pub.put_json(USAGE_KEY, load_json(STATE_DIR / "ai-usage.json", []))

@@ -15,6 +15,7 @@ Layout: `pipeline/` (Python 3.12), `channels/*.yaml` (one file per channel), `ap
    - Summaries are in our own words (no long quotes); every segment shows its source citation on screen.
    - No company logos, stock photos or other unlicensed images: text cards and generated abstract backgrounds only.
    - Secrets (LLM, TTS, R2 keys) live only in GitHub secrets and a git-ignored local `.env`; never commit or log them.
+   - Workers AI is metered by `pipeline/usage.py` (provider `usage.neurons`, rolling 24 h, stops at `stop_at` of the free allocation). Any new LLM call site must go through `usage.check` and `usage.record`; never record an unknown cost as 0.
    - LLM and TTS providers are config switches, not hard-coded. The TTS fallback must work on a CPU-only CI runner (no GPU-only engines).
    - `schedule.json` is append-only with absolute start/end times; the app takes "now" from the server `Date` header, not the box clock.
    - Encode H.264 720p, AAC, `-movflags +faststart`, loudness about -16 LUFS so channel switches do not jump in volume.
