@@ -1,14 +1,17 @@
 name = "ai-tv-scheduler"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
-workers_dev = false      # no public URL: this Worker only runs on its cron trigger
+workers_dev = false      # no public URL: this Worker only runs on its cron triggers
 preview_urls = false
 
 [vars]
 REPO = "timothylok/tv-app"
 WORKFLOW = "ai-news.yml"
+HOUSEKEEPING_WORKFLOW = "housekeeping.yml"
+HOUSEKEEPING_CRON = "30 11 * * *"   # must equal the second cron below
 BRANCH = "main"
 
-# UTC. 19:00, 01:00, 07:00 = 8am, 2pm, 8pm New Zealand summer time. Change to taste.
+# UTC. Episodes at 19:00, 01:00, 07:00 = 8am, 2pm, 8pm New Zealand summer time.
+# Housekeeping at 11:30 = 00:30 NZ summer time, between the 8pm and 8am episodes.
 [triggers]
-crons = ["0 19,1,7 * * *"]
+crons = ["0 19,1,7 * * *", "30 11 * * *"]

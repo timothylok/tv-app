@@ -14,6 +14,7 @@ import time
 from common import OUT_DIR, load_channel, log, save_json
 from ingest import fetch_stories, mark_seen
 from script import build_script
+from r2usage import R2BudgetExceeded
 from usage import BudgetExceeded
 
 
@@ -33,8 +34,17 @@ def main(argv=None):
 
     publishing = not args.local and not args.dry_run
     if publishing:
-        from publish import pull_state
+        from publish import Publisher, pull_state
+        import r2usage
         pull_state()
+        try:
+            r2usage.check(Publisher())  # storage and Class A operations vs the R2 free tier
+        except R2BudgetExceeded as e:
+            print(f"::warning::{e}")
+            log("run", str(e))
+            from publish import push_state
+            push_state()
+            return 0
     stories = fetch_stories(channel)
     try:
         script = build_script(channel, stories)
@@ -72,13 +82,15 @@ def main(argv=None):
     save_json(base / "episodes" / f"{ep_id}.json",
               {"id": ep_id, "title": script["title"], "duration": round(dur, 2),
                "script": script})
-    if not args.local:
-        from publish import publish_episode
-        publish_episode(channel, ep_id, script["title"], mp4, work)
-    mark_seen([s["story_id"] for s in script["segments"]])
-    if publishing:
-        from publish import push_state
-        push_state()
+    try:
+        if not args.local:
+            from publish import publish_episode
+            publish_episode(channel, ep_id, script["title"], mp4, work)
+        mark_seen([s["story_id"] for s in script["segments"]])
+    finally:  # even if the upload failed, keep the audit trail and the counters
+        if publishing:
+            from publish import push_state
+            push_state()
     if not args.keep_work:
         shutil.rmtree(work, ignore_errors=True)
     log("run", f"done: {mp4}")

@@ -13,13 +13,14 @@ file to and from the bucket together with the seen-story list.
 
     python usage.py               what the local ledger says
     python usage.py --remote      pull the ledger from the bucket first
-    python usage.py --reconcile   compare with Cloudflare analytics (needs CLOUDFLARE_ANALYTICS_TOKEN)
+    python usage.py --reconcile   compare with Cloudflare analytics (see reconcile.py, --probe there)
 """
 import argparse
 import os
 import sys
 import time
 
+import auditlog
 from common import STATE_DIR, load_env, load_json, log, save_json
 
 USAGE_FILE = STATE_DIR / "ai-usage.json"
@@ -32,7 +33,7 @@ RATES = {
 }
 UNKNOWN_CALL_COST = 1000  # charged when a call cannot be priced at all: too high beats too low
 DEFAULT_BUDGET = 10000
-DEFAULT_STOP_AT = 0.8
+DEFAULT_STOP_AT = 0.7   # shared with D:\AI\voice-ecosystem, see pipeline.md
 DEFAULT_RESERVE = 500     # headroom for the call we are about to make
 
 
@@ -51,6 +52,40 @@ def used(now=None):
     return sum(float(r.get("neurons", 0)) for r in _rows() if r.get("at", 0) > now - WINDOW_S)
 
 
+_provider_cache = {}
+
+
+def provider_24h(now=None):
+    """Cloudflare's own count for the trailing 24 h (hour buckets, rounded up), or None.
+
+    Needs CLOUDFLARE_ANALYTICS_TOKEN. It catches spend our ledger never saw (calls from another
+    machine, runs that crashed before saving). Cached for a minute; analytics lag a few minutes."""
+    now = time.time() if now is None else now
+    hit = _provider_cache.get("v")
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    try:
+        import reconcile
+        if not reconcile.available():
+            return None
+        val = reconcile.ai_totals(now - WINDOW_S)[0]
+    except Exception as e:  # noqa: BLE001  analytics down: fall back to the ledger, say so
+        log("usage", f"WARNING could not read Cloudflare analytics ({e}); using the ledger only")
+        return None
+    _provider_cache["v"] = (now, val)
+    return val
+
+
+def used_effective(now=None):
+    """The larger of our ledger and Cloudflare's own figure: the safe number to stop on."""
+    ours = used(now)
+    theirs = provider_24h(now)
+    if theirs is not None and theirs > ours * 1.05 + 25:
+        auditlog.event("ai", event="ledger-low", ledger=round(ours, 1), cloudflare=round(theirs, 1))
+        log("usage", f"Cloudflare reports {theirs:.0f} neurons vs ledger {ours:.0f}; using the higher")
+    return max(ours, theirs or 0.0)
+
+
 def limits(cfg):
     budget = float(cfg.get("daily_neuron_budget", DEFAULT_BUDGET))
     stop = float(cfg.get("stop_at", DEFAULT_STOP_AT))
@@ -60,8 +95,10 @@ def limits(cfg):
 def check(cfg, now=None):
     """Call before every Workers AI request. Raises BudgetExceeded when close to the daily limit."""
     budget, stop, reserve = limits(cfg)
-    spent = used(now)
+    spent = used_effective(now)
     if spent + reserve > budget * stop:
+        auditlog.event("ai", event="blocked", used_24h=round(spent, 1), budget=budget,
+                       stop_line=budget * stop, reserve=reserve)
         raise BudgetExceeded(
             f"Workers AI budget: {spent:.0f} neurons used in the last 24 h, stop line is "
             f"{budget * stop:.0f} of {budget:.0f} (next call reserves {reserve:.0f}); skipping")
@@ -91,39 +128,11 @@ def record(model, usage, now=None):
     rows.append({"at": round(now, 1), "model": model, "neurons": round(neurons, 4),
                  "exact": exact})
     save_json(USAGE_FILE, rows)
+    auditlog.event("ai", event="call", model=model, neurons=round(neurons, 4), exact=exact,
+                   used_24h=round(used(now), 1))
     log("usage", f"{neurons:.1f} neurons{'' if exact else ' (estimated)'}; "
                  f"{used(now):.0f} used in the last 24 h")
     return neurons
-
-
-def _reconcile():
-    """Compare today's local total with Cloudflare's own analytics (UTC day)."""
-    import requests
-    from urllib.parse import urlparse
-    load_env()
-    token = os.environ.get("CLOUDFLARE_ANALYTICS_TOKEN")
-    account = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or \
-        (urlparse(os.environ.get("R2_ENDPOINT", "")).hostname or "").split(".")[0]
-    if not token or not account:
-        print("set CLOUDFLARE_ANALYTICS_TOKEN (a token with Account Analytics: Read) to reconcile")
-        return 2
-    today = time.strftime("%Y-%m-%d", time.gmtime())
-    q = ('query{viewer{accounts(filter:{accountTag:"%s"}){aiInferenceAdaptiveGroups(limit:50,'
-         'filter:{date_geq:"%s"}){dimensions{date modelId}sum{totalNeurons}count}}}}' % (account, today))
-    r = requests.post("https://api.cloudflare.com/client/v4/graphql", json={"query": q},
-                      headers={"Authorization": f"Bearer {token}"}, timeout=30)
-    data = r.json()
-    if data.get("errors"):
-        print("analytics error:", data["errors"][0].get("message"))
-        return 2
-    groups = data["data"]["viewer"]["accounts"][0]["aiInferenceAdaptiveGroups"]
-    theirs = sum(g["sum"]["totalNeurons"] for g in groups)
-    midnight = time.mktime(time.strptime(today, "%Y-%m-%d")) - time.timezone
-    ours = sum(r["neurons"] for r in _rows() if r["at"] >= midnight)
-    print(f"Cloudflare today (UTC): {theirs:.1f} neurons over {sum(g['count'] for g in groups)} calls")
-    print(f"Local ledger today (UTC): {ours:.1f} neurons")
-    print("MISMATCH: the ledger reads low, fix it" if ours < theirs * 0.95 else "ledger agrees (within 5%)")
-    return 0
 
 
 def main(argv=None):
@@ -136,7 +145,8 @@ def main(argv=None):
         from publish import pull_state
         pull_state()
     if args.reconcile:
-        return _reconcile()
+        import reconcile
+        return reconcile.report()
     spent = used()
     print(f"{spent:.0f} neurons used in the last 24 h of {args.budget:.0f} "
           f"({spent / args.budget * 100:.1f}%); stop line {args.budget * DEFAULT_STOP_AT:.0f}")

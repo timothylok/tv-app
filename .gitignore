@@ -19,3 +19,4 @@ keystore.properties
 /build/
 .wrangler/
 node_modules/
+logs/
