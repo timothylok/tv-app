@@ -13,7 +13,8 @@ Working end to end in the cloud, with no dependence on the user's PC:
 
 ## Added in the latest work (verify before relying on it)
 
-- **Workers AI guard** (`usage.py`): rolling 24 h ledger from `usage.neurons`, stops at `stop_at` 0.7 of 10,000 (yaml `daily_neuron_budget`, `stop_at`). It also takes Cloudflare's own account-wide figure when `CLOUDFLARE_ANALYTICS_TOKEN` is set. Lowered from 0.8 because `D:\AI\voice-ecosystem` (active) shares the allowance (about 3,000 neurons a day, peak 5,100; see memory `shared-cloudflare-ai-account`).
+- **Workers AI guard** (`usage.py`): rolling 24 h ledger from `usage.neurons`, stops at `stop_at` 0.9 of 10,000 (yaml `daily_neuron_budget`, `stop_at`). It also takes Cloudflare's own account-wide figure when `CLOUDFLARE_ANALYTICS_TOKEN` is set (confirmed working on the GitHub runner 2026-11-19). `D:\AI\voice-ecosystem` (active) shares the allowance (about 3,000 neurons a day, peak 5,100; see memory `shared-cloudflare-ai-account`). It was 0.7 for a day, but account-wide use hit 7,300 on 2026-11-18 and would have skipped episodes, so it is 0.9 now; at the top, voice-ecosystem is the one that would run out. Housekeeping logs the account-wide figure and warns at 70%.
+- Workflows use actions/checkout@v7 and setup-python@v7 and are pinned to `ubuntu-24.04` (ubuntu-latest moves to 26.04; try `ubuntu-26.04` deliberately).
 - **R2 guard** (`r2usage.py`): counts every bucket call (`publish.Publisher`), measures storage by listing, stops at 80% of 10 GB or 1M Class A a month. Month counters in `state/r2-ops.json`.
 - **Daily audit logs** (`auditlog.py`): `logs/ai/<date>.jsonl`, `logs/r2/<date>.jsonl`, local (git-ignored) and in the bucket.
 - **Housekeeping** (`housekeeping.py`, `.github/workflows/housekeeping.yml`): prunes old schedule items, deletes orphan episodes, writes daily summaries. Second Worker cron `30 11 * * *`.

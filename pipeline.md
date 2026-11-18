@@ -43,7 +43,7 @@ A fresh Ubuntu machine each time, so memory between runs lives in the bucket.
    operations are over 80% of 1,000,000, skip the run with a warning (section 5).
 3. **Ingest** (`ingest.py`): reads the feeds in `channels/ai-news.yaml`; drops items older than 7
    days, already seen, or near-duplicate in title; at most 3 per source; newest first.
-4. **AI guard** (`usage.check`): if Workers AI use is near 70% of the free 10,000 neurons, skip the
+4. **AI guard** (`usage.check`): if Workers AI use is near 90% of the free 10,000 neurons, skip the
    run with a warning (section 4).
 5. **Script** (`script.py`, `llm.py`): the stories go to Cloudflare Workers AI
    (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, free tier). It returns JSON: an episode title and
@@ -94,10 +94,12 @@ only real stop is our own code.
   from tokens at the published rate and marked `exact: false`; if it cannot be priced, 1,000
   neurons are charged and an error is logged. **Unknown is never zero.**
 - The window is the trailing 24 hours (the allowance is not a UTC calendar day).
-- The stop line is `stop_at` (70%, so 7,000) of `daily_neuron_budget` (10,000), set in the channel yaml,
-  with 500 neurons reserved for the call about to be made. 70% and not 80% because the allowance is
-  shared with the active project `D:\AIoice-ecosystem` (about 3,000 neurons a day, peak 5,100,
-  measured 2026-11-10 to 17), which tv-app must leave room for. The figure the guard compares is
+- The stop line is `stop_at` (90%, so 9,000) of `daily_neuron_budget` (10,000), set in the channel yaml,
+  with 500 neurons reserved for the call about to be made. The allowance is shared with the active
+  project voice-ecosystem (about 3,000 neurons a day, peak 5,100, measured 2026-11-10 to 17). It was
+  70% for a day, but account-wide use reached 7,300 on 2026-11-18 (mostly other projects), which would
+  have skipped episodes, so it is now 90%. The cost: at the very top, tv-app plus voice-ecosystem can
+  hit 10,000 and voice-ecosystem is the one that then fails. The figure the guard compares is
   account-wide (Cloudflare analytics), so it counts voice-ecosystem's spend; it cannot slow
   voice-ecosystem down.
 - `used_effective` takes the larger of our ledger and Cloudflare's own analytics figure when

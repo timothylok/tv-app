@@ -17,7 +17,7 @@ feeds:
 llm:
   provider: workers-ai        # ollama (local, now) | gemini | groq | workers-ai (cloud, later)
   daily_neuron_budget: 10000   # Workers AI free allocation per 24 h
-  stop_at: 0.7                 # stop at 70% (7,000 neurons) of the ACCOUNT-wide use: voice-ecosystem shares this allowance
+  stop_at: 0.9                 # stop at 90% (9,000 neurons) of the ACCOUNT-wide use; voice-ecosystem shares this allowance (was 0.7)
   model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"   # Workers AI free tier; local alt: provider ollama, model gemma3:4b
 tts:
   provider: edge          # edge | piper | paid
