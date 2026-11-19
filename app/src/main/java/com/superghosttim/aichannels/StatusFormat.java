@@ -11,11 +11,12 @@ public final class StatusFormat {
 
     /** "19 Nov 2026, 8:04 am NZDT": New Zealand time (daylight saving included) whatever the box's zone is. */
     public static String nz(long epochMs) {
-        SimpleDateFormat f = new SimpleDateFormat("d MMM yyyy, h:mm a z", Locale.ENGLISH);
-        f.setTimeZone(TimeZone.getTimeZone("Pacific/Auckland"));
-        // am/pm case differs between JVM and Android's ICU: force lower case, keep the zone name (NZDT/NZST) as is
-        String s = f.format(new Date(epochMs));
-        return s.replace(" AM ", " am ").replace(" PM ", " pm ");
+        TimeZone nz = TimeZone.getTimeZone("Pacific/Auckland");
+        SimpleDateFormat f = new SimpleDateFormat("d MMM yyyy, h:mm a", Locale.ENGLISH);
+        f.setTimeZone(nz);
+        // Android's ICU prints "GMT+13:00" and the JVM "AM": build the zone name and am/pm case ourselves
+        String s = f.format(new Date(epochMs)).replace(" AM", " am").replace(" PM", " pm");
+        return s + (nz.inDaylightTime(new Date(epochMs)) ? " NZDT" : " NZST");
     }
 
     /** One line: "Updated 19 Nov 2026, 8:04 am NZDT | Episode 20261118-1902 | AI free left 94%". */
