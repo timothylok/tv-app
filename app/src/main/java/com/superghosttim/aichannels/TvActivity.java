@@ -4,9 +4,12 @@ import android.app.Activity;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
@@ -16,9 +19,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.media3.common.AudioAttributes;
@@ -43,18 +48,27 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Full-screen "live TV": picks the item that is on air by server time, seeks into it, and follows the schedule.
- * CH+/CH-/D-pad up/down switch channel, number keys jump, OK shows Now/Next, Back opens the channel list.
+ * Three modes:
+ *  HOME  - a short menu: Play latest, Continue watching, All episodes, Watch live (when something is on air).
+ *  VOD   - one episode on demand, with resume positions, a pause menu, "Leave episode?" on Back and an end screen.
+ *  LIVE  - the original "live TV": plays what is on air by server time (CH+/CH- lead here).
  * All network work runs on a background thread; the player and views are only touched on the main thread.
  */
 public class TvActivity extends Activity {
     private static final String TAG = "AITV";
-    private static final String FILLER_ID = "filler";
     private static final long TICK_MS = 2000;
-    private static final long RECENT_MS = 24L * 3600 * 1000;   // episodes you can watch again
     private static final long SCHEDULE_REFRESH_MS = 60_000;
-    private static final long GAP_REFRESH_MS = 10_000;
     private static final long DRIFT_LIMIT_MS = 5000;
+    private static final long SAVE_EVERY_MS = 10_000;
+    private static final long SEEK_MS = 10_000;
+    private static final long CONTROLS_HIDE_MS = 6000;
+
+    // Navy background colours (alpha first): captions stay readable over any video frame.
+    private static final int BG_CAPTION = 0xCC0B1220;   // 20% transparent: brief captions and the info banner
+    private static final int BG_TOPLINE = 0xA60B1220;   // 35% transparent: the always-on top line
+    private static final int BG_MENU = 0xF20B1220;      // 5% transparent: menus and the episode list
+
+    private enum Mode { HOME, VOD, LIVE }
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -63,20 +77,27 @@ public class TvActivity extends Activity {
 
     private SharedPreferences prefs;
     private ExoPlayer player;
+    private WatchState watch;
     private ChannelList channels = ChannelList.parse("{}");
     private int current = -1;
     private int generation = 0;          // bumped on every channel switch so stale fetches are ignored
-    private long lastRefresh = 0;
-    private long retryAt = 0;            // after a player error, wait before reloading
+    private long lastRefresh = 0, lastSave = 0;
+    private long retryAt = 0;            // live: after a player error, wait before reloading
     private boolean started = false;
-    private String replayId;                 // episode being watched again (in a gap, or picked from the list)
-    private boolean replayChosen;            // picked by the viewer: keep playing it even if it is also on air now
-    private List<ScheduleModel.Item> choices = new ArrayList<>();
-    private boolean listIsEpisodes;
+    private Mode mode = Mode.HOME;
+    private ScheduleModel.Item vodItem;  // the episode playing on demand
+    private long homeShownFor = -2;      // schedule `updated` the home screen was built from
+    private String homeNotice = "";
+    private boolean keepOn = false;
 
-    private TextView osdNumber, status, bannerChannel, bannerNow, bannerNext, bannerStatus;
+    private TextView osdNumber, status, bannerChannel, bannerNow, bannerNext, topBar;
     private View banner;
     private ListView list;
+    private List<ScheduleModel.Item> choices = new ArrayList<>();
+    private LinearLayout panel, panelButtons;
+    private TextView panelTitle, panelInfo;
+    private ProgressBar panelProgress;
+    private String panelKind = "";       // home, controls, paused, leave, end, error ("" = hidden)
     private final StringBuilder digits = new StringBuilder();
 
     private final Runnable tick = new Runnable() {
@@ -85,19 +106,17 @@ public class TvActivity extends Activity {
             main.postDelayed(this, TICK_MS);
         }
     };
-    private final Runnable hideBanner = new Runnable() {
-        @Override public void run() { banner.setVisibility(View.GONE); osdNumber.setVisibility(View.GONE); }
-    };
-    private final Runnable commitDigits = new Runnable() {
-        @Override public void run() { commitNumber(); }
-    };
+    private final Runnable hideBanner = () -> { banner.setVisibility(View.GONE); osdNumber.setVisibility(View.GONE); };
+    private final Runnable hideControls = () -> { if ("controls".equals(panelKind)) hidePanel(); };
+    private final Runnable clearStatus = () -> setStatus("");
+    private final Runnable commitDigits = this::commitNumber;
 
     // ------------------------------------------------------------------ lifecycle
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         prefs = getSharedPreferences("aitv", MODE_PRIVATE);
+        watch = WatchState.parse(prefs.getString("watch", ""));
         buildUi();
         player = new ExoPlayer.Builder(this).build();
         player.setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
@@ -105,9 +124,10 @@ public class TvActivity extends Activity {
         player.addListener(new Player.Listener() {
             @Override public void onPlayerError(PlaybackException e) {
                 Log.w(TAG, "player error: " + e.getErrorCodeName());
-                retryAt = System.currentTimeMillis() + 5000;
+                if (mode == Mode.VOD) { showError(); return; }
+                retryAt = System.currentTimeMillis() + 5000;   // live: try again quietly
                 player.stop();
-                player.clearMediaItems();   // sync() loads the right item again after the wait
+                player.clearMediaItems();
             }
         });
         ((PlayerView) findViewById(1)).setPlayer(player);
@@ -120,11 +140,13 @@ public class TvActivity extends Activity {
         started = true;
         main.removeCallbacks(tick);
         main.post(tick);
+        if (mode == Mode.VOD && vodItem != null && panelKind.isEmpty()) showPaused();   // back from the Home key
     }
 
     @Override protected void onStop() {
         started = false;
         main.removeCallbacks(tick);
+        saveProgress();
         if (player != null) player.pause();   // going Home must not leave sound playing
         super.onStop();
     }
@@ -144,6 +166,8 @@ public class TvActivity extends Activity {
         return Math.round(m.heightPixels * fractionOfHeight);
     }
 
+    private int width() { return getResources().getDisplayMetrics().widthPixels; }
+
     private TextView text(float sizeFrac, boolean bold) {
         TextView t = new TextView(this);
         t.setTextColor(Color.WHITE);
@@ -151,6 +175,19 @@ public class TvActivity extends Activity {
         if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setShadowLayer(4, 0, 2, Color.BLACK);
         return t;
+    }
+
+    /** Background and padding behind a caption so it never sits on bare video. */
+    private void solid(TextView t, int color) {
+        t.setBackgroundColor(color);
+        t.setPadding(px(0.015f), px(0.008f), px(0.015f), px(0.008f));
+    }
+
+    private GradientDrawable rounded(int color) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(px(0.012f));
+        return g;
     }
 
     private void buildUi() {
@@ -167,9 +204,23 @@ public class TvActivity extends Activity {
 
         status = text(0.04f, false);
         status.setGravity(Gravity.CENTER);
-        root.addView(status, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        solid(status, BG_CAPTION);
+        status.setVisibility(View.GONE);
+        root.addView(status, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+
+        topBar = text(0.028f, false);   // always on: episode, last update (NZ time), free AI left
+        topBar.setTextColor(0xCCFFFFFF);
+        topBar.setSingleLine(true);
+        topBar.setEllipsize(TextUtils.TruncateAt.END);
+        topBar.setMaxWidth(width() * 8 / 10);
+        solid(topBar, BG_TOPLINE);
+        topBar.setVisibility(View.GONE);
+        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        tp.setMargins(margin / 2, margin / 2, margin, margin);
+        root.addView(topBar, tp);
 
         osdNumber = text(0.09f, true);
+        solid(osdNumber, BG_CAPTION);
         osdNumber.setVisibility(View.GONE);
         FrameLayout.LayoutParams np = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
         np.setMargins(margin, margin, margin, margin);
@@ -177,7 +228,7 @@ public class TvActivity extends Activity {
 
         LinearLayout bl = new LinearLayout(this);
         bl.setOrientation(LinearLayout.VERTICAL);
-        bl.setBackgroundColor(0xCC0B1220);
+        bl.setBackgroundColor(BG_CAPTION);
         bl.setPadding(margin, px(0.025f), margin, px(0.025f));
         bannerChannel = text(0.05f, true);
         bannerNow = text(0.04f, false);
@@ -186,97 +237,398 @@ public class TvActivity extends Activity {
         bl.addView(bannerChannel);
         bl.addView(bannerNow);
         bl.addView(bannerNext);
-        bannerStatus = text(0.03f, false);
-        bannerStatus.setTextColor(0xFF8FA3C7);
-        bl.addView(bannerStatus);
         bl.setVisibility(View.GONE);
         banner = bl;
         FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         bp.setMargins(0, 0, 0, margin / 2);
         root.addView(bl, bp);
 
+        panel = new LinearLayout(this);   // one reusable menu: home, controls, paused, leave, end, error
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(BG_MENU);
+        panel.setPadding(px(0.06f), px(0.04f), px(0.06f), px(0.04f));
+        panelTitle = text(0.05f, true);
+        panelInfo = text(0.034f, false);
+        panelInfo.setTextColor(0xFFC9D6EE);
+        panelInfo.setLineSpacing(px(0.008f), 1f);
+        panelProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        panelProgress.setMax(1000);
+        panelButtons = new LinearLayout(this);
+        panel.addView(panelTitle);
+        panel.addView(panelInfo);
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, px(0.02f));
+        pp.topMargin = px(0.02f);
+        panel.addView(panelProgress, pp);
+        panel.addView(panelButtons, new LinearLayout.LayoutParams(-1, -2));
+        panel.setVisibility(View.GONE);
+        root.addView(panel, new FrameLayout.LayoutParams(width() * 3 / 5, -2, Gravity.CENTER));
+
         list = new ListView(this);
-        list.setBackgroundColor(0xE60B1220);
+        list.setBackgroundColor(BG_MENU);
         list.setVisibility(View.GONE);
-        list.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
-            @Override public void onItemClick(android.widget.AdapterView<?> p, View v, int pos, long id) {
-                hideList();
-                if (listIsEpisodes) { if (pos >= 0 && pos < choices.size()) playReplay(choices.get(pos)); }
-                else tuneTo(pos);
-            }
+        list.setOnItemClickListener((p, v, pos, id) -> {
+            if (pos < 0 || pos >= choices.size()) return;
+            ScheduleModel.Item c = choices.get(pos);
+            hideList();
+            playEpisode(c, watch.resumeAt(c.id));
         });
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                getResources().getDisplayMetrics().widthPixels * 2 / 5, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START);
-        root.addView(list, lp);
+        root.addView(list, new FrameLayout.LayoutParams(width() / 2, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START));
 
         setContentView(root);
     }
 
-    private void showList() {
-        if (channels.size() == 0) return;
-        String[] names = new String[channels.size()];
-        for (int i = 0; i < names.length; i++) names[i] = channels.get(i).number + "   " + channels.get(i).name;
-        listIsEpisodes = false;
-        fillList(names, Math.max(0, current));
+    private Button button(String label, Runnable action) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextColor(Color.WHITE);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(0.038f));
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        b.setPadding(px(0.03f), px(0.012f), px(0.03f), px(0.012f));
+        StateListDrawable sd = new StateListDrawable();
+        sd.addState(new int[]{android.R.attr.state_focused}, rounded(0xFF3B82F6));
+        sd.addState(new int[]{}, rounded(0xFF1F2A44));
+        b.setBackground(sd);
+        b.setFocusable(true);
+        b.setOnClickListener(v -> action.run());
+        return b;
     }
 
-    /** Episodes of the last 24 hours, newest first; OK plays the chosen one from the start. */
+    /** Show the menu panel. progress < 0 hides the bar; bottom + horizontal = the playback controls row. */
+    private void showPanel(String kind, String title, String info, int progress, boolean bottom, boolean horizontal,
+                           String[] labels, Runnable[] actions, int focus) {
+        panelKind = kind;
+        main.removeCallbacks(hideControls);
+        panelTitle.setText(title);
+        panelTitle.setVisibility(TextUtils.isEmpty(title) ? View.GONE : View.VISIBLE);
+        panelInfo.setText(info);
+        panelInfo.setVisibility(TextUtils.isEmpty(info) ? View.GONE : View.VISIBLE);
+        panelProgress.setVisibility(progress >= 0 ? View.VISIBLE : View.GONE);
+        if (progress >= 0) panelProgress.setProgress(progress);
+        panelButtons.removeAllViews();
+        panelButtons.setOrientation(horizontal ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        Button first = null, focused = null;
+        for (int i = 0; i < labels.length; i++) {
+            Button b = button(labels[i], actions[i]);
+            LinearLayout.LayoutParams lp = horizontal ? new LinearLayout.LayoutParams(-2, -2) : new LinearLayout.LayoutParams(-1, -2);
+            if (horizontal) lp.rightMargin = px(0.02f);
+            lp.topMargin = px(0.02f);
+            panelButtons.addView(b, lp);
+            if (first == null) first = b;
+            if (i == focus) focused = b;
+        }
+        FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) panel.getLayoutParams();
+        fl.width = bottom ? -1 : width() * 3 / 5;
+        fl.gravity = bottom ? Gravity.BOTTOM : Gravity.CENTER;
+        panel.setLayoutParams(fl);
+        panel.setTranslationX(0);
+        panel.setTranslationY(0);
+        panel.setVisibility(View.VISIBLE);
+        banner.setVisibility(View.GONE);
+        Button f = focused != null ? focused : first;
+        if (f != null && list.getVisibility() != View.VISIBLE) f.requestFocus();
+        if ("controls".equals(kind)) main.postDelayed(hideControls, CONTROLS_HIDE_MS);
+    }
+
+    private void hidePanel() {
+        panelKind = "";
+        main.removeCallbacks(hideControls);
+        panel.setVisibility(View.GONE);
+    }
+
+    private void setStatus(String s) {
+        status.setText(s == null ? "" : s);
+        status.setVisibility(TextUtils.isEmpty(s) ? View.GONE : View.VISIBLE);
+    }
+
+    // ------------------------------------------------------------------ the schedule of the current channel
+
+    private ScheduleModel sched() {
+        if (current < 0 || current >= channels.size()) return null;
+        return schedules.get(channels.get(current).id);
+    }
+
+    private long now() { return clock.now(System.currentTimeMillis()); }
+
+    private List<ScheduleModel.Item> available() {
+        ScheduleModel s = sched();
+        return s == null ? new ArrayList<ScheduleModel.Item>() : s.available(now());
+    }
+
+    private String describe(ScheduleModel.Item it) {
+        return StatusFormat.day(it.start, now()) + "  ·  " + StatusFormat.minutes(it.end - it.start);
+    }
+
+    private String withLabel(String text, String id) {
+        String l = watch.label(id);
+        return l.isEmpty() ? text : text + "  ·  " + l;
+    }
+
+    private String channelName() { return current >= 0 && current < channels.size() ? channels.get(current).name : "AI Channels"; }
+
+    // ------------------------------------------------------------------ HOME
+
+    private void showHome(String notice) {
+        homeNotice = notice == null ? "" : notice;
+        saveProgress();
+        mode = Mode.HOME;
+        vodItem = null;
+        player.stop();
+        player.clearMediaItems();
+        hideList();
+        setStatus("");
+        buildHome();
+    }
+
+    private void buildHome() {
+        ScheduleModel s = sched();
+        homeShownFor = s == null ? -2 : s.updated();
+        if (s == null) {
+            showPanel("home", channelName(), "Loading episodes...", -1, false, false, new String[0], new Runnable[0], 0);
+            return;
+        }
+        List<ScheduleModel.Item> av = s.available(now());
+        watch.prune(av);
+        final ScheduleModel.Item latest = av.isEmpty() ? null : av.get(0);
+        String resumeId = watch.resumeCandidate(av);
+        final ScheduleModel.Item resume = resumeId == null ? null : findIn(av, resumeId);
+        final ScheduleModel.Item live = s.itemAt(now());
+
+        StringBuilder info = new StringBuilder();
+        if (!homeNotice.isEmpty()) info.append(homeNotice).append("\n");
+        info.append(latest == null ? "No episodes yet. New ones are made at 8 am and 2 pm."
+                : withLabel("Latest:  Episode " + latest.id + "  ·  " + describe(latest), latest.id));
+        if (resume != null) info.append("\nContinue:  Episode ").append(resume.id).append("  ·  ")
+                .append(WatchState.clock(watch.remaining(resume.id))).append(" remaining");
+
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        int latestAt = -1, resumeAt = -1;
+        if (latest != null) { latestAt = labels.size(); labels.add("▶  Play latest episode"); actions.add(() -> playEpisode(latest, 0)); }
+        if (resume != null) {
+            resumeAt = labels.size();
+            labels.add("↻  Continue watching");
+            actions.add(() -> playEpisode(resume, watch.resumeAt(resume.id)));
+        }
+        int episodesAt = labels.size();
+        labels.add("▣  All episodes");
+        actions.add(this::showEpisodes);
+        if (live != null) { labels.add("●  Watch live now"); actions.add(() -> goLive(current)); }
+
+        WatchState.Focus f = watch.homeFocus(latest == null ? null : latest.id, resume == null ? null : resume.id);
+        int focus = f == WatchState.Focus.LATEST && latestAt >= 0 ? latestAt
+                : f == WatchState.Focus.RESUME && resumeAt >= 0 ? resumeAt : episodesAt;
+        showPanel("home", channelName(), info.toString(), -1, false, false,
+                labels.toArray(new String[0]), actions.toArray(new Runnable[0]), focus);
+    }
+
+    // ------------------------------------------------------------------ episode list
+
     private void showEpisodes() {
-        if (current < 0 || current >= channels.size()) return;
-        ScheduleModel s = schedules.get(channels.get(current).id);
-        if (s == null) return;
-        long now = clock.now(System.currentTimeMillis());
-        choices = s.recent(now, RECENT_MS);
-        ScheduleModel.Item live = s.itemAt(now);
+        choices = available();
         String[] names = new String[Math.max(1, choices.size())];
-        if (choices.isEmpty()) names[0] = "No episodes in the last 24 hours";
+        if (choices.isEmpty()) names[0] = "No episodes yet";
+        int sel = 0;
         for (int i = 0; i < choices.size(); i++) {
             ScheduleModel.Item c = choices.get(i);
-            names[i] = StatusFormat.nzShort(c.start) + "   " + c.title
-                    + (live != null && live.id.equals(c.id) ? "   (on air)" : "");
+            names[i] = withLabel("Episode " + c.id + "\n" + describe(c), c.id);
+            if (vodItem != null && vodItem.id.equals(c.id)) sel = i;
         }
-        listIsEpisodes = true;
-        fillList(names, 0);
-    }
-
-    private void fillList(String[] names, int selected) {
-        final int size = px(0.045f);
+        final int size = px(0.036f);
         list.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, names) {
             @Override public View getView(int pos, View v, ViewGroup parent) {
                 TextView t = (TextView) super.getView(pos, v, parent);
                 t.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
                 t.setTextColor(Color.WHITE);
-                t.setPadding(px(0.06f), px(0.02f), px(0.02f), px(0.02f));
+                t.setPadding(px(0.06f), px(0.018f), px(0.02f), px(0.018f));
                 return t;
             }
         });
         list.setVisibility(View.VISIBLE);
-        list.setSelection(selected);
+        list.setSelection(sel);
         list.requestFocus();
     }
 
-    private void hideList() { list.setVisibility(View.GONE); }
+    private void hideList() {
+        if (list.getVisibility() != View.VISIBLE) return;
+        list.setVisibility(View.GONE);
+        if (!panelKind.isEmpty() && panelButtons.getChildCount() > 0) panelButtons.getChildAt(0).requestFocus();
+    }
 
-    private void setStatus(String s) { status.setText(s == null ? "" : s); }
+    // ------------------------------------------------------------------ VOD: one episode on demand
 
-    private void showBanner() {
+    private void playEpisode(ScheduleModel.Item it, long fromMs) {
+        if (it == null) return;
+        saveProgress();
+        hidePanel();
+        hideList();
+        mode = Mode.VOD;
+        vodItem = it;
+        setStatus("");
+        player.setRepeatMode(Player.REPEAT_MODE_OFF);
+        player.setMediaItem(new MediaItem.Builder().setMediaId(it.id).setUri(it.url).build());
+        player.prepare();
+        player.seekTo(0, Math.max(0, fromMs));
+        player.play();
+        watch.record(it.id, fromMs, it.end - it.start, System.currentTimeMillis());   // "started": no longer New
+        persistWatch();
+        Log.i(TAG, "playing " + it.id + " from " + fromMs / 1000 + "s");
+        showInfoBanner();
+    }
+
+    private long duration() {
+        long d = player.getDuration();
+        return d > 0 ? d : vodItem == null ? 0 : vodItem.end - vodItem.start;
+    }
+
+    private void saveProgress() {
+        if (mode != Mode.VOD || vodItem == null || player == null) return;
+        if (player.getPlaybackState() == Player.STATE_ENDED) return;   // the end screen marks it watched
+        if (player.getPlaybackState() == Player.STATE_IDLE) return;    // error / stopped: keep the last good position
+        watch.record(vodItem.id, player.getCurrentPosition(), duration(), System.currentTimeMillis());
+        persistWatch();
+        lastSave = System.currentTimeMillis();
+    }
+
+    private void persistWatch() { prefs.edit().putString("watch", watch.toJson()).apply(); }
+
+    private int progress() {
+        long d = duration();
+        return d <= 0 ? 0 : (int) Math.min(1000, player.getCurrentPosition() * 1000 / d);
+    }
+
+    private String timeLine() {
+        return WatchState.clock(player.getCurrentPosition()) + " / " + WatchState.clock(duration());
+    }
+
+    private void showControls() {
+        if (vodItem == null) return;
+        final List<ScheduleModel.Item> av = available();
+        final ScheduleModel.Item older = ScheduleModel.older(av, vodItem.id), newer = ScheduleModel.newer(av, vodItem.id);
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        labels.add(player.isPlaying() ? "❚❚  Pause" : "▶  Play");
+        actions.add(this::togglePlay);
+        if (older != null) { labels.add("◀  Previous"); actions.add(() -> playEpisode(older, watch.resumeAt(older.id))); }
+        if (newer != null) { labels.add("Next  ▶"); actions.add(() -> playEpisode(newer, watch.resumeAt(newer.id))); }
+        labels.add("More episodes"); actions.add(this::showEpisodes);
+        labels.add("Exit"); actions.add(this::showLeave);
+        showPanel("controls", "Episode " + vodItem.id + "  ·  " + channelName(), timeLine(), progress(), true, true,
+                labels.toArray(new String[0]), actions.toArray(new Runnable[0]), 0);
+    }
+
+    private void togglePlay() {
+        if (player.isPlaying()) pause();
+        else { hidePanel(); player.play(); }
+    }
+
+    private void pause() {
+        player.pause();
+        saveProgress();
+        showPaused();
+    }
+
+    private void showPaused() {
+        if (vodItem == null) return;
+        final List<ScheduleModel.Item> av = available();
+        showPanel("paused", "Paused", "Episode " + vodItem.id + "\n" + WatchState.clock(player.getCurrentPosition())
+                        + " of " + WatchState.clock(duration()), progress(), false, false,
+                new String[]{"Resume", "Choose episode", "Play latest", "Exit playback"},
+                new Runnable[]{
+                        () -> { hidePanel(); player.play(); },
+                        this::showEpisodes,
+                        () -> { if (!av.isEmpty()) playEpisode(av.get(0), 0); },
+                        () -> showHome("Your position was saved.")},
+                0);
+    }
+
+    private void showLeave() {
+        if (vodItem == null) return;
+        player.pause();
+        saveProgress();
+        showPanel("leave", "Leave episode?", "Your position will be saved at " + WatchState.clock(player.getCurrentPosition()) + ".",
+                -1, false, false,
+                new String[]{"Save and exit", "Keep watching", "Choose another episode"},
+                new Runnable[]{
+                        () -> showHome("Your position was saved."),
+                        () -> { hidePanel(); player.play(); },
+                        this::showEpisodes},
+                0);
+    }
+
+    private void showEnd(final ScheduleModel.Item done) {
+        mode = Mode.VOD;
+        vodItem = done;
+        watch.markWatched(done.id, System.currentTimeMillis());
+        persistWatch();
+        final List<ScheduleModel.Item> av = available();
+        final ScheduleModel.Item latest = av.isEmpty() ? null : av.get(0);
+        ScheduleModel.Item nx = ScheduleModel.newer(av, done.id);
+        if (nx == null) nx = ScheduleModel.older(av, done.id);
+        final ScheduleModel.Item next = nx;
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        String title, info;
+        if (latest != null && !latest.id.equals(done.id) && !watch.started(latest.id)) {
+            title = "New episode available";
+            info = "Episode " + latest.id + " is now available.";
+            labels.add("Play episode " + latest.id); actions.add(() -> playEpisode(latest, 0));
+            labels.add("Replay episode " + done.id); actions.add(() -> playEpisode(done, 0));
+        } else {
+            title = "Episode complete";
+            info = "Episode " + done.id + " finished.";
+            if (next != null) { labels.add("Play next episode (" + next.id + ")"); actions.add(() -> playEpisode(next, watch.resumeAt(next.id))); }
+            if (latest != null && !latest.id.equals(done.id) && (next == null || !latest.id.equals(next.id))) {
+                labels.add("Play latest"); actions.add(() -> playEpisode(latest, 0));
+            }
+            labels.add("Replay"); actions.add(() -> playEpisode(done, 0));
+        }
+        labels.add("Choose episode"); actions.add(this::showEpisodes);
+        labels.add("Return to menu"); actions.add(() -> showHome(""));
+        showPanel("end", title, info, -1, false, false, labels.toArray(new String[0]), actions.toArray(new Runnable[0]), 0);
+    }
+
+    private void showError() {
+        final ScheduleModel.Item it = vodItem;
+        player.stop();
+        showPanel("error", "Playback could not start", "Check your internet connection.", -1, false, false,
+                new String[]{"Try again", "Choose another episode", "Exit"},
+                new Runnable[]{
+                        () -> playEpisode(it, it == null ? 0 : watch.resumeAt(it.id)),
+                        this::showEpisodes,
+                        () -> showHome("")},
+                0);
+    }
+
+    private void seekBy(long delta) {
+        long d = duration();
+        long to = Math.max(0, player.getCurrentPosition() + delta);
+        if (d > 0) to = Math.min(to, Math.max(0, d - 1000));
+        player.seekTo(to);
+        setStatus(WatchState.clock(to) + " / " + WatchState.clock(d));
+        main.removeCallbacks(clearStatus);
+        main.postDelayed(clearStatus, 1500);
+    }
+
+    /** Down (or after picking): what is playing and what comes next (hides after 5 s). */
+    private void showInfoBanner() {
         if (current < 0 || current >= channels.size()) return;
         ChannelList.Channel ch = channels.get(current);
-        ScheduleModel s = schedules.get(ch.id);
-        long now = clock.now(System.currentTimeMillis());
-        DateFormat tf = android.text.format.DateFormat.getTimeFormat(this);
         bannerChannel.setText("CH " + ch.number + "   " + ch.name);
-        ScheduleModel.Item it = s == null ? null : s.itemAt(now);
-        ScheduleModel.Item next = s == null ? null : s.nextAfter(now);
-        ScheduleModel.Item rp = replayId == null || s == null ? null : findIn(s.recent(now, RECENT_MS), replayId);
-        bannerNow.setText(rp != null && (replayChosen || it == null)
-                ? "Watching again: " + rp.title + "  (from " + StatusFormat.nzShort(rp.start) + ")"
-                : it != null ? "Now: " + it.title + "  (until " + tf.format(new Date(it.end)) + ")"
-                : "Next episode coming up shortly");
-        bannerNext.setText(next != null ? "Next: " + next.title + "  at " + tf.format(new Date(next.start)) : "");
-        bannerNext.setVisibility(next != null ? View.VISIBLE : View.GONE);
-        ScheduleModel.Item last = s == null ? null : s.lastStartedBy(now);
-        bannerStatus.setText(s == null ? "" : StatusFormat.line(s.updated(), last == null ? null : last.id, s.aiLeftPct()));
+        ScheduleModel s = sched();
+        long now = now();
+        if (mode == Mode.VOD && vodItem != null) {
+            bannerNow.setText("Episode " + vodItem.id + "  ·  " + describe(vodItem));
+            ScheduleModel.Item nx = ScheduleModel.newer(available(), vodItem.id);
+            bannerNext.setText(nx != null ? "Newer: Episode " + nx.id : "You are watching the latest episode.");
+        } else {
+            DateFormat tf = android.text.format.DateFormat.getTimeFormat(this);
+            ScheduleModel.Item it = s == null ? null : s.itemAt(now);
+            ScheduleModel.Item next = s == null ? null : s.nextAfter(now);
+            bannerNow.setText(it != null ? "Live: " + it.title + "  (until " + tf.format(new Date(it.end)) + ")" : "Nothing is live right now.");
+            bannerNext.setText(next != null ? "Next: " + next.title + "  at " + tf.format(new Date(next.start)) : "");
+        }
+        bannerNext.setVisibility(bannerNext.getText().length() > 0 ? View.VISIBLE : View.GONE);
         banner.setVisibility(View.VISIBLE);
         osdNumber.setText(String.valueOf(ch.number));
         osdNumber.setVisibility(View.VISIBLE);
@@ -287,35 +639,64 @@ public class TvActivity extends Activity {
     // ------------------------------------------------------------------ keys
 
     @Override public boolean onKeyDown(int code, KeyEvent e) {
-        boolean listShown = list.getVisibility() == View.VISIBLE;
-        if (code == KeyEvent.KEYCODE_BACK) {
-            if (listShown) hideList(); else showList();
+        if (list.getVisibility() == View.VISIBLE) {
+            if (code == KeyEvent.KEYCODE_BACK) { hideList(); return true; }   // back to where you were, nothing changed
+            return super.onKeyDown(code, e);
+        }
+        if (code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_CHANNEL_DOWN) {
+            if (channels.size() > 0) goLive(code == KeyEvent.KEYCODE_CHANNEL_DOWN ? channels.down(current) : channels.up(current));
             return true;
         }
-        if (listShown) return super.onKeyDown(code, e);   // the list handles its own D-pad / OK
-        switch (code) {
-            case KeyEvent.KEYCODE_CHANNEL_UP:
-            case KeyEvent.KEYCODE_DPAD_UP:
-                if (channels.size() > 0) tuneTo(channels.up(current));
-                return true;
-            case KeyEvent.KEYCODE_CHANNEL_DOWN:
-            case KeyEvent.KEYCODE_DPAD_DOWN:
-                if (channels.size() > 0) tuneTo(channels.down(current));
-                return true;
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-            case KeyEvent.KEYCODE_MENU:
-            case KeyEvent.KEYCODE_GUIDE:
-                showEpisodes();
-                return true;
-            case KeyEvent.KEYCODE_DPAD_CENTER:
-            case KeyEvent.KEYCODE_ENTER:
-            case KeyEvent.KEYCODE_NUMPAD_ENTER:
-                if (digits.length() > 0) commitNumber(); else showBanner();
-                return true;
-            default:
-                if (code >= KeyEvent.KEYCODE_0 && code <= KeyEvent.KEYCODE_9) { typeDigit(code - KeyEvent.KEYCODE_0); return true; }
-                if (code >= KeyEvent.KEYCODE_NUMPAD_0 && code <= KeyEvent.KEYCODE_NUMPAD_9) { typeDigit(code - KeyEvent.KEYCODE_NUMPAD_0); return true; }
-                return super.onKeyDown(code, e);
+        if (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_GUIDE) { showEpisodes(); return true; }
+        boolean playPause = code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                || code == KeyEvent.KEYCODE_MEDIA_PAUSE;
+        if (!panelKind.isEmpty()) {
+            if (code == KeyEvent.KEYCODE_BACK) { panelBack(); return true; }
+            if (playPause && mode == Mode.VOD && !"end".equals(panelKind) && !"error".equals(panelKind)) { togglePlay(); return true; }
+            if ("controls".equals(panelKind)) {   // any key keeps the controls up a little longer
+                main.removeCallbacks(hideControls);
+                main.postDelayed(hideControls, CONTROLS_HIDE_MS);
+            }
+            return super.onKeyDown(code, e);   // the buttons handle their own focus / OK
+        }
+        if (mode == Mode.VOD) {
+            switch (code) {
+                case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_ENTER: case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                case KeyEvent.KEYCODE_DPAD_UP:
+                    showControls(); return true;
+                case KeyEvent.KEYCODE_DPAD_DOWN: showInfoBanner(); return true;
+                case KeyEvent.KEYCODE_DPAD_LEFT: case KeyEvent.KEYCODE_MEDIA_REWIND: seekBy(-SEEK_MS); return true;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD: seekBy(SEEK_MS); return true;
+                case KeyEvent.KEYCODE_BACK: showLeave(); return true;
+                default:
+                    if (playPause) { togglePlay(); return true; }
+            }
+        }
+        if (mode == Mode.LIVE) {
+            switch (code) {
+                case KeyEvent.KEYCODE_BACK: showHome(""); return true;
+                case KeyEvent.KEYCODE_DPAD_UP: if (channels.size() > 0) goLive(channels.up(current)); return true;
+                case KeyEvent.KEYCODE_DPAD_DOWN: if (channels.size() > 0) goLive(channels.down(current)); return true;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: showEpisodes(); return true;
+                case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_ENTER: case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                    if (digits.length() > 0) commitNumber(); else showInfoBanner();
+                    return true;
+                default: break;
+            }
+        }
+        if (code == KeyEvent.KEYCODE_BACK && mode == Mode.HOME) { finish(); return true; }
+        if (code >= KeyEvent.KEYCODE_0 && code <= KeyEvent.KEYCODE_9) { typeDigit(code - KeyEvent.KEYCODE_0); return true; }
+        if (code >= KeyEvent.KEYCODE_NUMPAD_0 && code <= KeyEvent.KEYCODE_NUMPAD_9) { typeDigit(code - KeyEvent.KEYCODE_NUMPAD_0); return true; }
+        return super.onKeyDown(code, e);
+    }
+
+    /** Back on a menu never loses your place. */
+    private void panelBack() {
+        switch (panelKind) {
+            case "home": finish(); break;                                    // top level: leave the app
+            case "controls": hidePanel(); break;
+            case "paused": case "leave": hidePanel(); player.play(); break;  // = keep watching
+            default: showHome(""); break;                                     // end / error screens
         }
     }
 
@@ -335,7 +716,7 @@ public class TvActivity extends Activity {
         int n = Integer.parseInt(digits.toString());
         digits.setLength(0);
         int idx = channels.indexOfNumber(n);
-        if (idx >= 0) tuneTo(idx);
+        if (idx >= 0) goLive(idx);
         else { osdNumber.setText(n + "  -"); main.postDelayed(hideBanner, 1500); }
     }
 
@@ -370,53 +751,56 @@ public class TvActivity extends Activity {
 
     private void loadChannels() {
         setStatus("Connecting...");
-        io.execute(new Runnable() {
-            @Override public void run() {
-                String body = null;
-                try {
-                    Net.Result r = Net.get(BuildConfig.CHANNELS_URL);
-                    clock.update(r.date, r.ageSeconds, r.sentLocal, r.recvLocal);
-                    body = r.body;
-                    if (ChannelList.parse(body).size() > 0) writeCache("channels.json", body);
-                } catch (Exception e) {
-                    Log.w(TAG, "channels fetch failed: " + e);
-                    body = readCache("channels.json");
-                }
-                final ChannelList parsed = body == null ? ChannelList.parse("{}") : ChannelList.parse(body);
-                main.post(new Runnable() {
-                    @Override public void run() { onChannels(parsed); }
-                });
+        io.execute(() -> {
+            String body;
+            try {
+                Net.Result r = Net.get(BuildConfig.CHANNELS_URL);
+                clock.update(r.date, r.ageSeconds, r.sentLocal, r.recvLocal);
+                body = r.body;
+                if (ChannelList.parse(body).size() > 0) writeCache("channels.json", body);
+            } catch (Exception e) {
+                Log.w(TAG, "channels fetch failed: " + e);
+                body = readCache("channels.json");
             }
+            final ChannelList parsed = body == null ? ChannelList.parse("{}") : ChannelList.parse(body);
+            main.post(() -> onChannels(parsed));
         });
     }
 
     private void onChannels(ChannelList list) {
         if (isFinishing() || player == null) return;
         if (list.size() == 0) {
-            setStatus("Can't reach the channels. Retrying...");
-            main.postDelayed(new Runnable() { @Override public void run() { if (player != null) loadChannels(); } }, 10_000);
+            setStatus("No internet connection. Trying again...");
+            main.postDelayed(() -> { if (player != null) loadChannels(); }, 10_000);
             return;
         }
+        setStatus("");
         channels = list;
         int idx = channels.indexOfId(prefs.getString("last", ""));
-        tuneTo(idx >= 0 ? idx : 0);
+        current = idx >= 0 ? idx : 0;
+        showHome("");
+        refreshSchedule(true);
     }
 
-    private void tuneTo(int idx) {
+    /** Live TV on channel idx: plays what is on air now, by server time. */
+    private void goLive(int idx) {
         if (idx < 0 || idx >= channels.size()) return;
+        saveProgress();
+        hidePanel();
+        hideList();
+        if (idx != current) generation++;
         current = idx;
-        generation++;
-        replayId = null;
-        replayChosen = false;
+        mode = Mode.LIVE;
+        vodItem = null;
         prefs.edit().putString("last", channels.get(idx).id).apply();
         digits.setLength(0);
         retryAt = 0;
         player.stop();
         player.clearMediaItems();
         setStatus("");
-        showBanner();
+        showInfoBanner();
         refreshSchedule(true);
-        sync();   // plays at once if a cached schedule exists
+        sync();
     }
 
     /** Fetch the current channel's schedule in the background; the result is applied on the main thread. */
@@ -427,55 +811,32 @@ public class TvActivity extends Activity {
         lastRefresh = t;
         final int gen = generation;
         final ChannelList.Channel ch = channels.get(current);
-        io.execute(new Runnable() {
-            @Override public void run() {
-                String body = null;
-                try {
-                    Net.Result r = Net.get(ch.scheduleUrl);
-                    clock.update(r.date, r.ageSeconds, r.sentLocal, r.recvLocal);
-                    body = r.body;
-                    writeCache("schedule-" + ch.id + ".json", body);
-                } catch (Exception e) {
-                    Log.w(TAG, "schedule fetch failed: " + e);
-                    if (schedules.get(ch.id) == null) body = readCache("schedule-" + ch.id + ".json");
-                }
-                if (body == null) return;
-                final ScheduleModel m = ScheduleModel.parse(body);
-                main.post(new Runnable() {
-                    @Override public void run() {
-                        if (player == null) return;
-                        schedules.put(ch.id, m);
-                        if (gen == generation) sync();
-                    }
-                });
+        io.execute(() -> {
+            String body = null;
+            try {
+                Net.Result r = Net.get(ch.scheduleUrl);
+                clock.update(r.date, r.ageSeconds, r.sentLocal, r.recvLocal);
+                body = r.body;
+                writeCache("schedule-" + ch.id + ".json", body);
+            } catch (Exception e) {
+                Log.w(TAG, "schedule fetch failed: " + e);
+                if (schedules.get(ch.id) == null) body = readCache("schedule-" + ch.id + ".json");
             }
+            if (body == null) return;
+            final ScheduleModel m = ScheduleModel.parse(body);
+            main.post(() -> {
+                if (player == null) return;
+                schedules.put(ch.id, m);
+                if (gen == generation) sync();
+            });
         });
     }
 
-    // ------------------------------------------------------------------ playback: one idempotent "make the player match the schedule"
+    // ------------------------------------------------------------------ the 2-second tick
 
     private static ScheduleModel.Item findIn(List<ScheduleModel.Item> l, String id) {
         for (ScheduleModel.Item i : l) if (i.id.equals(id)) return i;
         return null;
-    }
-
-    private void loadReplay(ScheduleModel.Item r) {
-        player.setMediaItem(new MediaItem.Builder().setMediaId(r.id).setUri(r.url).build());
-        player.setRepeatMode(Player.REPEAT_MODE_OFF);
-        player.prepare();
-        player.seekTo(0, 0);
-        player.play();
-        Log.i(TAG, "watching again: " + r.id);
-    }
-
-    /** The viewer picked an episode from the list: play it from the start. */
-    private void playReplay(ScheduleModel.Item r) {
-        replayId = r.id;
-        replayChosen = true;
-        retryAt = 0;
-        setStatus("");
-        loadReplay(r);
-        showBanner();
     }
 
     private String playingId() {
@@ -483,79 +844,89 @@ public class TvActivity extends Activity {
         return mi == null ? null : mi.mediaId;
     }
 
+    private void setKeepScreenOn(boolean on) {   // idle menus let the TV's screensaver take over (no burn-in)
+        if (on == keepOn) return;
+        keepOn = on;
+        if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+
+    private void updateTopBar(ScheduleModel s, long now, long wall) {
+        String have = playingId();
+        ScheduleModel.Item last = s.lastStartedBy(now);
+        String ep = have != null ? have : (last == null ? null : last.id);
+        topBar.setText(StatusFormat.topLine(s.updated(), ep, s.aiLeftPct()));
+        topBar.setVisibility(View.VISIBLE);
+        int d = px(0.006f);   // drift a few pixels every minute so static text cannot burn in
+        long m = wall / 60000;
+        topBar.setTranslationX((m % 3) * d);
+        topBar.setTranslationY(((m / 3) % 3) * d);
+        if (!panelKind.isEmpty() && !"controls".equals(panelKind)) {
+            panel.setTranslationX((m % 3 - 1) * d);
+            panel.setTranslationY(((m / 3) % 3 - 1) * d);
+        }
+    }
+
     private void sync() {
         if (player == null || current < 0 || !started) return;
         long wall = System.currentTimeMillis();
+        setKeepScreenOn(player.isPlaying());
         refreshSchedule(false);
-        if (wall < retryAt) return;
-        ChannelList.Channel ch = channels.get(current);
-        ScheduleModel s = schedules.get(ch.id);
-        if (s == null) { setStatus("Loading schedule..."); return; }
+        ScheduleModel s = sched();
+        if (s == null) { if (mode == Mode.LIVE) setStatus("Loading..."); return; }
         long now = clock.now(wall);
-        ScheduleModel.Item it = s.itemAt(now);
+        updateTopBar(s, now, wall);
         boolean ended = player.getPlaybackState() == Player.STATE_ENDED;
-        if (replayId != null && replayChosen && replayId.equals(playingId()) && !ended
-                && (it == null || it.id.equals(replayId))) {
-            return;   // the viewer picked this episode: let it play to the end (even if it is also on air now)
+
+        if (mode == Mode.HOME) {   // keep the home screen current when a new episode arrives (never touches the player)
+            if ("home".equals(panelKind) && s.updated() != homeShownFor && list.getVisibility() != View.VISIBLE) buildHome();
+            return;
         }
-        if (it != null) {
-            replayId = null;          // live takes over from any replay
-            replayChosen = false;
-            setStatus("");
+        if (mode == Mode.VOD) {    // on demand: the schedule never interrupts; only the end of the episode does
+            if (vodItem == null) return;
+            if (ended && !"end".equals(panelKind)) { showEnd(vodItem); return; }
+            if (player.isPlaying() && wall - lastSave > SAVE_EVERY_MS) saveProgress();
+            if ("controls".equals(panelKind)) { panelInfo.setText(timeLine()); panelProgress.setProgress(progress()); }
+            return;
+        }
+
+        // LIVE
+        if (wall < retryAt) return;
+        ScheduleModel.Item it = s.itemAt(now);
+        if (it == null) {
             String have = playingId();
-            if (!it.id.equals(have) || ended) {
-                player.setRepeatMode(Player.REPEAT_MODE_OFF);
-                player.setMediaItem(new MediaItem.Builder().setMediaId(it.id).setUri(it.url).build());
-                ScheduleModel.Item next = s.nextAfter(now);
-                if (ScheduleModel.contiguous(it, next)) {   // queue the next one so the switch is gapless
-                    player.addMediaItem(new MediaItem.Builder().setMediaId(next.id).setUri(next.url).build());
-                }
-                player.prepare();
-                player.seekTo(0, Math.max(0, now - it.start));
-                player.play();
-                Log.i(TAG, "on air: " + it.id + " at +" + (now - it.start) / 1000 + "s");
-            } else {
-                if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_READY) player.play();
-                // keep following the clock: seek only when clearly out of step (buffering stalls are not drift)
-                if (player.getPlaybackState() == Player.STATE_READY && player.isPlaying()) {
-                    long expect = now - it.start;
-                    if (Math.abs(player.getCurrentPosition() - expect) > DRIFT_LIMIT_MS) {
-                        Log.i(TAG, "drift fix to +" + expect / 1000 + "s");
-                        player.seekTo(Math.max(0, expect));
-                    }
-                }
-                // queue the next item once it becomes contiguous and is not queued yet
-                ScheduleModel.Item next = s.nextAfter(now);
-                if (ScheduleModel.contiguous(it, next) && player.getMediaItemCount() == 1) {
-                    player.addMediaItem(new MediaItem.Builder().setMediaId(next.id).setUri(next.url).build());
+            ScheduleModel.Item done = have == null ? null : findIn(s.available(now), have);
+            if (done != null && ended) showEnd(done);                       // the live episode finished
+            else if (done == null) showHome("Nothing is live right now.");
+            return;
+        }
+        setStatus("");
+        String have = playingId();
+        if (!it.id.equals(have) || ended) {
+            player.setRepeatMode(Player.REPEAT_MODE_OFF);
+            player.setMediaItem(new MediaItem.Builder().setMediaId(it.id).setUri(it.url).build());
+            ScheduleModel.Item next = s.nextAfter(now);
+            if (ScheduleModel.contiguous(it, next)) {   // queue the next one so the switch is gapless
+                player.addMediaItem(new MediaItem.Builder().setMediaId(next.id).setUri(next.url).build());
+            }
+            player.prepare();
+            player.seekTo(0, Math.max(0, now - it.start));
+            player.play();
+            Log.i(TAG, "on air: " + it.id + " at +" + (now - it.start) / 1000 + "s");
+        } else {
+            if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_READY) player.play();
+            // keep following the clock: seek only when clearly out of step (buffering stalls are not drift)
+            if (player.getPlaybackState() == Player.STATE_READY && player.isPlaying()) {
+                long expect = now - it.start;
+                if (Math.abs(player.getCurrentPosition() - expect) > DRIFT_LIMIT_MS) {
+                    Log.i(TAG, "drift fix to +" + expect / 1000 + "s");
+                    player.seekTo(Math.max(0, expect));
                 }
             }
-            return;
+            ScheduleModel.Item next = s.nextAfter(now);
+            if (ScheduleModel.contiguous(it, next) && player.getMediaItemCount() == 1) {
+                player.addMediaItem(new MediaItem.Builder().setMediaId(next.id).setUri(next.url).build());
+            }
         }
-        // gap: watch the recent episodes again (newest first, then the older ones) until the next one is on air
-        List<ScheduleModel.Item> recent = s.recent(now, RECENT_MS);
-        if (!recent.isEmpty()) {
-            ScheduleModel.Item r = replayId == null ? null : findIn(recent, replayId);
-            boolean replaying = r != null && r.id.equals(playingId());
-            if (r == null) r = recent.get(0);                                          // nothing chosen yet: the newest
-            else if (replaying && ended) r = ScheduleModel.nextReplay(recent, r.id);   // finished: the next one
-            if (!r.id.equals(playingId()) || ended) { replayChosen = false; loadReplay(r); }
-            else if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_READY) player.play();
-            replayId = r.id;
-            setStatus("");
-            if (wall - lastRefresh > GAP_REFRESH_MS) refreshSchedule(true);
-            return;
-        }
-        // nothing recent at all: loop the filler (or wait)
-        if (s.filler() == null) { setStatus("Next episode coming up shortly"); return; }
-        setStatus("");
-        if (!FILLER_ID.equals(playingId())) {
-            player.setMediaItem(new MediaItem.Builder().setMediaId(FILLER_ID).setUri(s.filler()).build());
-            player.setRepeatMode(Player.REPEAT_MODE_ONE);
-            player.prepare();
-            player.play();
-            Log.i(TAG, "on air: filler");
-        }
-        if (wall - lastRefresh > GAP_REFRESH_MS) refreshSchedule(true);
     }
 }

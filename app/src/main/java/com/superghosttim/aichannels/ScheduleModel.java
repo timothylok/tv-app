@@ -103,6 +103,21 @@ public final class ScheduleModel {
         return out;
     }
 
+    /** Every episode that has started (all the server still keeps, about 48 h), newest first. */
+    public List<Item> available(long now) { return recent(now, Long.MAX_VALUE / 2); }
+
+    /** In a newest-first list: the next newer episode (or null). */
+    public static Item newer(List<Item> newestFirst, String id) {
+        for (int i = 1; i < newestFirst.size(); i++) if (newestFirst.get(i).id.equals(id)) return newestFirst.get(i - 1);
+        return null;
+    }
+
+    /** In a newest-first list: the next older episode (or null). */
+    public static Item older(List<Item> newestFirst, String id) {
+        for (int i = 0; i < newestFirst.size() - 1; i++) if (newestFirst.get(i).id.equals(id)) return newestFirst.get(i + 1);
+        return null;
+    }
+
     /** The episode to replay after `afterId` (the next older one, wrapping to the newest), or null if the list is empty. */
     public static Item nextReplay(List<Item> newestFirst, String afterId) {
         if (newestFirst.isEmpty()) return null;

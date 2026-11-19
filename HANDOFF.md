@@ -7,7 +7,7 @@ Last updated 2026-11-18. Read `pipeline.md` for how everything works; this file 
 Working end to end in the cloud, with no dependence on the user's PC:
 
 - Cloudflare Worker `ai-tv-scheduler` (cron) starts the GitHub workflow `ai-news` (8am and 2pm NZ; the 8pm run was dropped); the workflow ingests feeds, writes a script with Workers AI, voices it with edge-tts, renders an MP4 with ffmpeg and publishes it to the R2 bucket `ai-tv-channels` with an append-only `schedule.json`.
-- The Android TV app (`app/`, package `com.superghosttim.aichannels`, `TvActivity`) plays the schedule live: server-time seek-in, filler in gaps, channel up/down, number keys, OK banner, Back channel list.
+- The Android TV app (`app/`, package `com.superghosttim.aichannels`, `TvActivity`) opens on a home menu and plays episodes on demand (Play latest, Continue watching, All episodes with New/Watched/% labels, saved positions in `WatchState`, pause menu, Back = Leave episode?, end-of-episode menu). Channel up/down or Watch live now gives live TV (server-time seek-in). Always-on top line: episode, last update (NZ), free AI %. Captions use per-element transparency (20% / 35% / 5%). Not yet checked on the Android 10 box. See `usermanual.md`.
 - Repo: https://github.com/timothylok/tv-app (public), branch `main`. Public bucket URL: `https://pub-31476484de9245329a3f35502c44e692.r2.dev` (r2.dev dev URL: MVP only, move to a custom domain, e.g. a subdomain of fittertrack.com, before a Play release).
 - Verified on 2026-11-18: three GitHub runs passed (one started by the Worker cron: dispatch HTTP 204), an episode built on GitHub played on the Google TV, the Workers AI guard ledger reached the bucket with exact neuron figures.
 
@@ -34,7 +34,7 @@ Working end to end in the cloud, with no dependence on the user's PC:
 
 ## Open items and assumptions
 
-- **Test devices:** the Google_TV at 192.168.3.97 (wireless debugging port changes: `adb mdns services`) is the one used and verified (API 34); the user chose it over the Android 10 box for now. Not checked: network loss, multi-hour soak, back-to-back gapless handover.
+- **Test devices:** the Google_TV at 192.168.3.101 (was .97; wireless debugging port changes: `adb mdns services`) is the one used and verified (API 34); the user chose it over the Android 10 box for now. Not checked: network loss, multi-hour soak, back-to-back gapless handover.
 - **Expiring tokens:** the Worker's GitHub token (`GITHUB_TOKEN`, fine-grained, Actions read/write, this repo only) expires 2026-12-18; the analytics token was created with a 90-day expiry (about 2027-02-16). Renew both: the Worker stops starting runs silently otherwise.
 - **Secrets** live only in `.env` (git-ignored; also `.env.bak`, `.env.*` ignored), GitHub Actions secrets and the Worker secret. Names: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ANALYTICS_TOKEN`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL`. Never paste them in chat.
 - The bucket is public, so `state/` and `logs/` are readable by anyone (counts and names only).

@@ -119,6 +119,51 @@ public class ModelTest {
         assertEquals("19 Nov, 2:21 pm", StatusFormat.nzShort(1795051289000L));
     }
 
+    @Test public void watchStateTracksProgressAndFocus() {
+        long h = 3600_000L;
+        ScheduleModel s = ScheduleModel.parse("{\"items\":["
+                + "{\"id\":\"a\",\"url\":\"https://x.test/a.mp4\",\"start\":" + h + ",\"end\":" + (h + 200_000) + "},"
+                + "{\"id\":\"b\",\"url\":\"https://x.test/b.mp4\",\"start\":" + 7 * h + ",\"end\":" + (7 * h + 200_000) + "}]}");
+        java.util.List<ScheduleModel.Item> av = s.available(60 * h);
+        assertEquals(2, av.size());
+        assertEquals("b", av.get(0).id);
+        assertEquals("b", ScheduleModel.newer(av, "a").id);
+        assertNull(ScheduleModel.newer(av, "b"));
+        assertEquals("a", ScheduleModel.older(av, "b").id);
+        assertNull(ScheduleModel.older(av, "a"));
+
+        WatchState w = WatchState.parse(null);
+        assertEquals("New", w.label("b"));
+        assertEquals(WatchState.Focus.LATEST, w.homeFocus("b", null));          // newest unplayed: Play latest
+        w.record("a", 80_000, 200_000, 1000);
+        assertEquals("40% watched", w.label("a"));
+        assertEquals(80_000, w.resumeAt("a"));
+        assertEquals("a", w.resumeCandidate(av));
+        assertEquals(120_000, w.remaining("a"));
+        w.record("b", 185_000, 200_000, 2000);                                  // last 20 s counts as watched
+        assertEquals("Watched", w.label("b"));
+        assertEquals(0, w.resumeAt("b"));
+        assertEquals(WatchState.Focus.RESUME, w.homeFocus("b", w.resumeCandidate(av)));
+        w.record("x", 5_000, 200_000, 3000);                                    // barely started: no resume
+        assertEquals(0, w.resumeAt("x"));
+        assertEquals("", w.label("x"));
+
+        WatchState back = WatchState.parse(w.toJson());                         // survives a restart
+        assertEquals(80_000, back.resumeAt("a"));
+        assertTrue(back.watched("b"));
+        back.prune(av);
+        assertFalse(back.started("x"));
+        back.prune(new java.util.ArrayList<ScheduleModel.Item>());              // empty schedule keeps history
+        assertTrue(back.started("a"));
+        assertEquals(WatchState.Focus.EPISODES, WatchState.parse("garbage").homeFocus(null, null));
+        assertEquals("6:42", WatchState.clock(402_000));
+        long t = 1795051289000L;   // 19 Nov 2026, 2:21 pm NZDT
+        assertEquals("Today 2:21 pm", StatusFormat.day(t, t + 3600_000L));
+        assertEquals("Yesterday 2:21 pm", StatusFormat.day(t, t + 24 * 3600_000L));
+        assertEquals("19 Nov 2:21 pm", StatusFormat.day(t, t + 48 * 3600_000L));
+        assertEquals("2 min", StatusFormat.minutes(146_000));
+    }
+
     @Test public void statusLineUsesNewZealandTime() {
         // 2026-11-18 19:04 UTC = 19 Nov 08:04 NZDT (UTC+13); 2026-07-01 00:00 UTC = 12:00 pm NZST (UTC+12)
         assertEquals("19 Nov 2026, 8:04 am NZDT", StatusFormat.nz(1795028655550L));
@@ -126,5 +171,8 @@ public class ModelTest {
         assertEquals("Updated 19 Nov 2026, 8:04 am NZDT  |  Episode 20261118-1902  |  AI free left 94%",
                 StatusFormat.line(1795028655550L, "20261118-1902", 94));
         assertEquals("Updated: unknown  |  AI free left unknown", StatusFormat.line(0, null, -1));
+        assertEquals("Episode 20261118-1902  |  Updated 19 Nov 2026, 8:04 am NZDT  |  AI free left 94%",
+                StatusFormat.topLine(1795028655550L, "20261118-1902", 94));
+        assertEquals("Updated: unknown  |  AI free left unknown", StatusFormat.topLine(0, null, -1));
     }
 }

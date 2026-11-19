@@ -157,12 +157,21 @@ expiry, so renew it).
 
 ## 9. The TV app (`app/`)
 
-On launch it fetches `channels.json`, then the channel's schedule. "Now" is the server's HTTP
-`Date` header, not the box's clock, so every TV shows the same moment. It plays the item with
-`start <= now < end`, seeking to the right offset, and, in gaps, replays the episodes of the last 24 hours (newest first, then older; the filler loops only when there are none). D-pad right opens a list of those episodes to pick from. It re-syncs every
-2 seconds, re-fetches the schedule every 60 seconds, and queues the next episode for a seamless
-switch when it follows straight on. The OK banner also shows the schedule's `updated` time in NZ time, the latest episode id and `ai.left_pct` (free Workers AI left, account-wide, written at each publish; shows "unknown" on schedules published before this field existed). Keys: channel up/down, number keys, OK for the now/next
-banner, Back for the channel list. See `usermanual.md`.
+On launch it fetches `channels.json`, then the channel's schedule, and opens a **home menu**:
+Play latest, Continue watching (only when something is part-watched), All episodes (everything
+the schedule still holds, about 48 hours, newest first, labelled New / N% watched / Watched) and
+Watch live now (only while an episode is on air). Episodes play **on demand**: resume positions
+and watched state live in `WatchState` (plain Java, unit-tested), saved as JSON in
+SharedPreferences every 10 s, on pause, on Back and on stop. OK shows the controls, Play/Pause
+opens the pause menu, Back asks "Leave episode?", and the end of an episode shows a menu (play
+next, play latest, replay, choose, return); nothing starts by itself and a new episode never
+interrupts. Channel up/down still gives **live TV**: "now" is the server's HTTP `Date` header, it
+plays the item with `start <= now < end` at the right offset, re-syncs every 2 seconds and queues
+a following item for a seamless switch. The schedule is re-fetched every 60 seconds. A thin
+top-left line is always on: episode id, the schedule's `updated` time in NZ time and
+`ai.left_pct` (free Workers AI left, account-wide, written at each publish); it and the menus
+drift a few pixels a minute against burn-in, and the screen-on flag is held only while video
+plays. See `usermanual.md` for the keys.
 
 ## 10. Secrets and where they live
 
