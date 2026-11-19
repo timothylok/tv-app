@@ -164,6 +164,34 @@ public class ModelTest {
         assertEquals("2 min", StatusFormat.minutes(146_000));
     }
 
+    private static String ep(String id, long start) {
+        return "{\"id\":\"" + id + "\",\"url\":\"https://x.test/" + id + ".mp4\",\"start\":" + start + ",\"end\":" + (start + 120_000) + "}";
+    }
+
+    @Test public void browserGroupsWeekDayAndHalf() {
+        long now = 1795051289000L + 3600_000L;     // Thu 19 Nov 2026, 3:21 pm NZDT
+        long h = 3600_000L, d = 24 * h;
+        ScheduleModel s = ScheduleModel.parse("{\"items\":[" + ep("a", now - 7 * h) + "," + ep("b", now - 25 * h)
+                + "," + ep("c", now - 31 * h) + "," + ep("d", now - 11 * d) + "]}");
+        java.util.List<ScheduleModel.Item> all = s.available(now);
+        assertEquals(4, all.size());
+        java.util.List<EpisodeBrowser.Group> weeks = EpisodeBrowser.group(all, EpisodeBrowser.WEEK, now);
+        assertEquals(2, weeks.size());
+        assertEquals("This week", weeks.get(0).label);
+        assertEquals(3, weeks.get(0).items.size());
+        java.util.List<EpisodeBrowser.Group> days = EpisodeBrowser.group(weeks.get(0).items, EpisodeBrowser.DAY, now);
+        assertEquals("Today", days.get(0).label);
+        assertEquals("Yesterday", days.get(1).label);
+        assertEquals(2, days.get(1).items.size());
+        java.util.List<EpisodeBrowser.Group> halves = EpisodeBrowser.group(days.get(1).items, EpisodeBrowser.HALF, now);
+        assertEquals("Afternoon / evening (PM)", halves.get(0).label);   // b: yesterday 2:21 pm
+        assertEquals("Morning (AM)", halves.get(1).label);               // c: yesterday 8:04 am
+        // a single group at a level is skipped: one day, two halves -> start at AM/PM
+        assertEquals(EpisodeBrowser.HALF, EpisodeBrowser.firstUsefulLevel(days.get(1).items, EpisodeBrowser.WEEK, now));
+        assertEquals(EpisodeBrowser.LEAF, EpisodeBrowser.firstUsefulLevel(halves.get(0).items, EpisodeBrowser.WEEK, now));
+        assertEquals(EpisodeBrowser.WEEK, EpisodeBrowser.firstUsefulLevel(all, EpisodeBrowser.WEEK, now));
+    }
+
     @Test public void statusLineUsesNewZealandTime() {
         // 2026-11-18 19:04 UTC = 19 Nov 08:04 NZDT (UTC+13); 2026-07-01 00:00 UTC = 12:00 pm NZST (UTC+12)
         assertEquals("19 Nov 2026, 8:04 am NZDT", StatusFormat.nz(1795028655550L));

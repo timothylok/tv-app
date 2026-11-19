@@ -2,20 +2,21 @@
 
 Open **AI Channels** from the Android TV home screen. It opens on a short menu for the channel you watched last (AI News TV). New episodes are made twice a day, at about 8 am and 2 pm New Zealand time.
 
-A thin line at the top left is always on: the episode (named by the New Zealand time it was made, for example "Today 8:10 am"), when the channel was last updated (New Zealand time) and how much of the free AI allowance is left..
+A thin line at the top left shows the episode (named by the New Zealand time it was made, for example "Today 8:10 am"), when the channel was last updated (New Zealand time) and how much of the free AI allowance is left. It appears when the app opens and whenever you press a key, and hides itself after 10 seconds (change this on the home menu: off, 5, 10, 30, 60 seconds or always on) so it cannot burn into the screen.
 
 ## Home menu
 | Button | What it does |
 |---|---|
 | Play latest episode | Starts the newest episode from the beginning |
 | Continue watching | Shown only when you have a part-watched episode: carries on where you stopped |
-| All episodes | The list of every episode still available (about two days), newest first |
+| All episodes | Browse the episodes still available (about two days now): week, then day, then morning or afternoon/evening (AM/PM), then the episodes. Levels with only one choice are skipped |
+| Top line: N seconds | Settings: press OK to cycle how long the top-left line stays up after a key press: off, 5, 10, 30, 60 seconds or always on |
 | Watch live now | Shown only while an episode is on air: joins it at the live point, like TV |
 
 The highlighted button is the one you most likely want: **Play latest** when there is a new episode, otherwise **Continue watching** if you stopped part-way, otherwise **Play latest** or **All episodes**. The menu updates by itself when a new episode arrives.
 
 ## Episode list
-Episodes are named by when they were made in New Zealand time ("Today 8:10 am", "Yesterday 2:21 pm", "18 Nov 10:40 pm"), never by a code. Each row shows that time, the length and **New**, **N% watched** or **Watched**. Up/down to move, OK to play (a part-watched episode carries on where you stopped). Back closes the list and changes nothing.
+Back goes up one level; at the top it closes the list. Each group shows how many episodes it holds and how many are new. Episodes are named by when they were made in New Zealand time ("Today 8:10 am", "Yesterday 2:21 pm", "18 Nov 10:40 pm"), never by a code. Each row shows that time, the length and **New**, **N% watched** or **Watched**. Up/down to move, OK to play (a part-watched episode carries on where you stopped). Back closes the list and changes nothing.
 
 ## While an episode plays
 | Key | What it does |

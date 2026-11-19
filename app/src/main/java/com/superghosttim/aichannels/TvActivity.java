@@ -89,6 +89,11 @@ public class TvActivity extends Activity {
     private long homeShownFor = -2;      // schedule `updated` the home screen was built from
     private String homeNotice = "";
     private boolean keepOn = false;
+    private boolean topBarShown = false;
+    // Settings: how long the top line stays up after a key press (seconds; 0 = never show, -1 = always on).
+    private static final int[] TOPBAR_CHOICES = {0, 5, 10, 30, 60, -1};
+    private static final int TOPBAR_DEFAULT = 10;
+    private int homeFocusOverride = -1;
 
     private TextView osdNumber, status, bannerChannel, bannerNow, bannerNext, topBar;
     private View banner;
@@ -106,7 +111,8 @@ public class TvActivity extends Activity {
             main.postDelayed(this, TICK_MS);
         }
     };
-    private final Runnable hideBanner = () -> { banner.setVisibility(View.GONE); osdNumber.setVisibility(View.GONE); };
+    private final Runnable hideTopBar = () -> topBar.setVisibility(View.GONE);
+    private final Runnable hideBanner =() -> { banner.setVisibility(View.GONE); osdNumber.setVisibility(View.GONE); };
     private final Runnable hideControls = () -> { if ("controls".equals(panelKind)) hidePanel(); };
     private final Runnable clearStatus = () -> setStatus("");
     private final Runnable commitDigits = this::commitNumber;
@@ -267,6 +273,10 @@ public class TvActivity extends Activity {
         list.setBackgroundColor(BG_MENU);
         list.setVisibility(View.GONE);
         list.setOnItemClickListener((p, v, pos, id) -> {
+            if (rowGroups != null) {   // a week / day / AM-PM row: go one level down
+                if (pos >= 0 && pos < rowGroups.size()) openLevel(rowGroups.get(pos).items, browseStack.get(browseStack.size() - 1).level + 1);
+                return;
+            }
             if (pos < 0 || pos >= choices.size()) return;
             ScheduleModel.Item c = choices.get(pos);
             hideList();
@@ -417,25 +427,76 @@ public class TvActivity extends Activity {
         labels.add("▣  All episodes");
         actions.add(this::showEpisodes);
         if (live != null) { labels.add("●  Watch live now"); actions.add(() -> goLive(current)); }
+        final int settingsAt = labels.size();
+        labels.add("⚙  Top line: " + topBarName(topBarSeconds()) + "  (OK to change)");
+        actions.add(() -> { cycleTopBar(); homeFocusOverride = settingsAt; buildHome(); });
 
         WatchState.Focus f = watch.homeFocus(latest == null ? null : latest.id, resume == null ? null : resume.id);
         int focus = f == WatchState.Focus.LATEST && latestAt >= 0 ? latestAt
                 : f == WatchState.Focus.RESUME && resumeAt >= 0 ? resumeAt : episodesAt;
+        if (homeFocusOverride >= 0) { focus = homeFocusOverride; homeFocusOverride = -1; }
         showPanel("home", channelName(), info.toString(), -1, false, false,
                 labels.toArray(new String[0]), actions.toArray(new Runnable[0]), focus);
     }
 
     // ------------------------------------------------------------------ episode list
 
+    /** One screen of the episode browser: the episodes it covers and which level (week / day / AM-PM / the episodes). */
+    private static final class Frame {
+        final List<ScheduleModel.Item> items;
+        final int level;
+        Frame(List<ScheduleModel.Item> items, int level) { this.items = items; this.level = level; }
+    }
+
+    private final List<Frame> browseStack = new ArrayList<>();
+    private List<EpisodeBrowser.Group> rowGroups;   // non-null while the list shows week / day / AM-PM rows
+
+    /** All episodes: week, then day, then AM or PM, then the episodes. Levels with a single choice are skipped. */
     private void showEpisodes() {
-        choices = available();
-        String[] names = new String[Math.max(1, choices.size())];
-        if (choices.isEmpty()) names[0] = "No episodes yet";
+        browseStack.clear();
+        openLevel(available(), EpisodeBrowser.WEEK);
+    }
+
+    private void openLevel(List<ScheduleModel.Item> items, int level) {
+        int lv = EpisodeBrowser.firstUsefulLevel(items, level, now());
+        browseStack.add(new Frame(items, lv));
+        renderBrowse();
+    }
+
+    /** Back inside the browser goes up one level; at the top it closes the list. */
+    private void listBack() {
+        if (browseStack.size() > 1) {
+            browseStack.remove(browseStack.size() - 1);
+            renderBrowse();
+        } else {
+            hideList();
+        }
+    }
+
+    private String groupLine(EpisodeBrowser.Group g) {
+        int fresh = 0;
+        for (ScheduleModel.Item it : g.items) if (!watch.started(it.id)) fresh++;
+        return g.items.size() + (g.items.size() == 1 ? " episode" : " episodes") + (fresh > 0 ? "  ·  " + fresh + " new" : "");
+    }
+
+    private void renderBrowse() {
+        Frame f = browseStack.get(browseStack.size() - 1);
+        String[] names;
         int sel = 0;
-        for (int i = 0; i < choices.size(); i++) {
-            ScheduleModel.Item c = choices.get(i);
-            names[i] = withLabel(when(c) + "\n" + StatusFormat.minutes(c.end - c.start), c.id);
-            if (vodItem != null && vodItem.id.equals(c.id)) sel = i;
+        if (f.level == EpisodeBrowser.LEAF) {
+            rowGroups = null;
+            choices = f.items;
+            names = new String[Math.max(1, choices.size())];
+            if (choices.isEmpty()) names[0] = "No episodes yet";
+            for (int i = 0; i < choices.size(); i++) {
+                ScheduleModel.Item c = choices.get(i);
+                names[i] = withLabel(when(c) + "\n" + StatusFormat.minutes(c.end - c.start), c.id);
+                if (vodItem != null && vodItem.id.equals(c.id)) sel = i;
+            }
+        } else {
+            rowGroups = EpisodeBrowser.group(f.items, f.level, now());
+            names = new String[rowGroups.size()];
+            for (int i = 0; i < names.length; i++) names[i] = rowGroups.get(i).label + "\n" + groupLine(rowGroups.get(i));
         }
         final int size = px(0.036f);
         list.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, names) {
@@ -454,6 +515,8 @@ public class TvActivity extends Activity {
 
     private void hideList() {
         if (list.getVisibility() != View.VISIBLE) return;
+        browseStack.clear();
+        rowGroups = null;
         list.setVisibility(View.GONE);
         if (!panelKind.isEmpty() && panelButtons.getChildCount() > 0) panelButtons.getChildAt(0).requestFocus();
     }
@@ -643,7 +706,7 @@ public class TvActivity extends Activity {
 
     @Override public boolean onKeyDown(int code, KeyEvent e) {
         if (list.getVisibility() == View.VISIBLE) {
-            if (code == KeyEvent.KEYCODE_BACK) { hideList(); return true; }   // back to where you were, nothing changed
+            if (code == KeyEvent.KEYCODE_BACK) { listBack(); return true; }   // up one level; at the top it closes, nothing changed
             return super.onKeyDown(code, e);
         }
         if (code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_CHANNEL_DOWN) {
@@ -854,13 +917,43 @@ public class TvActivity extends Activity {
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
+    /** The top line shows for 10 s (at start and after any key press), then hides so it cannot burn into the screen. */
+    private void showTopBar() {
+        main.removeCallbacks(hideTopBar);
+        int secs = topBarSeconds();
+        if (secs == 0 || topBar.getText().length() == 0) { topBar.setVisibility(View.GONE); return; }
+        topBar.setVisibility(View.VISIBLE);
+        if (secs > 0) main.postDelayed(hideTopBar, secs * 1000L);   // -1: stays on
+    }
+
+    private int topBarSeconds() { return prefs.getInt("topbar_s", TOPBAR_DEFAULT); }
+
+    private static String topBarName(int secs) {
+        return secs == 0 ? "off" : secs < 0 ? "always on" : secs + " seconds";
+    }
+
+    /** Settings button on Home: cycles the top line's auto-hide time and saves it. */
+    private void cycleTopBar() {
+        int cur = topBarSeconds(), next = TOPBAR_CHOICES[0];
+        for (int i = 0; i < TOPBAR_CHOICES.length; i++) {
+            if (TOPBAR_CHOICES[i] == cur) { next = TOPBAR_CHOICES[(i + 1) % TOPBAR_CHOICES.length]; break; }
+        }
+        prefs.edit().putInt("topbar_s", next).apply();
+        showTopBar();
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent e) {
+        if (e.getAction() == KeyEvent.ACTION_DOWN) showTopBar();
+        return super.dispatchKeyEvent(e);
+    }
+
     private void updateTopBar(ScheduleModel s, long now, long wall) {
         String have = playingId();
         ScheduleModel.Item last = s.lastStartedBy(now);
         ScheduleModel.Item ep = have == null ? null : findIn(s.available(now), have);
         if (ep == null) ep = last;
         topBar.setText(StatusFormat.topLine(s.updated(), ep == null ? 0 : ep.start, now, s.aiLeftPct()));
-        topBar.setVisibility(View.VISIBLE);
+        if (!topBarShown) { topBarShown = true; showTopBar(); }   // once at start; then only on a key press
         int d = px(0.006f);   // the top line stays put (the user wants it constant); only the menus drift against burn-in
         long m = wall / 60000;
         if (!panelKind.isEmpty() && !"controls".equals(panelKind)) {
