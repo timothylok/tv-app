@@ -17,6 +17,16 @@ def _clean(text):
     return re.sub(r"\s+", " ", html.unescape(text)).strip()
 
 
+def _body(e):
+    """The fullest text the feed itself carries: full content when present, else the summary."""
+    best = _clean(e.get("summary"))
+    for c in e.get("content") or []:
+        t = _clean(c.get("value"))
+        if len(t) > len(best):
+            best = t
+    return best
+
+
 def story_id(link, title):
     return hashlib.sha1((link or title).encode("utf-8")).hexdigest()[:16]
 
@@ -50,7 +60,7 @@ def fetch_stories(channel, limit=12):
             if not title or sid in seen:
                 continue
             stories.append({"id": sid, "title": title, "source": source, "link": link,
-                            "summary": _clean(e.get("summary"))[:700], "when": when})
+                            "summary": _body(e)[:1800], "when": when})
         log("ingest", f"{source}: {len(feed.entries)} entries")
     stories.sort(key=lambda s: s["when"], reverse=True)
     # de-dupe near-identical titles across feeds

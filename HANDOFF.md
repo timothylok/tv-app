@@ -6,7 +6,7 @@ Last updated 2026-11-18. Read `pipeline.md` for how everything works; this file 
 
 Working end to end in the cloud, with no dependence on the user's PC:
 
-- Cloudflare Worker `ai-tv-scheduler` (cron) starts the GitHub workflow `ai-news` (8am, 2pm, 8pm NZ); the workflow ingests feeds, writes a script with Workers AI, voices it with edge-tts, renders an MP4 with ffmpeg and publishes it to the R2 bucket `ai-tv-channels` with an append-only `schedule.json`.
+- Cloudflare Worker `ai-tv-scheduler` (cron) starts the GitHub workflow `ai-news` (8am and 2pm NZ; the 8pm run was dropped); the workflow ingests feeds, writes a script with Workers AI, voices it with edge-tts, renders an MP4 with ffmpeg and publishes it to the R2 bucket `ai-tv-channels` with an append-only `schedule.json`.
 - The Android TV app (`app/`, package `com.superghosttim.aichannels`, `TvActivity`) plays the schedule live: server-time seek-in, filler in gaps, channel up/down, number keys, OK banner, Back channel list.
 - Repo: https://github.com/timothylok/tv-app (public), branch `main`. Public bucket URL: `https://pub-31476484de9245329a3f35502c44e692.r2.dev` (r2.dev dev URL: MVP only, move to a custom domain, e.g. a subdomain of fittertrack.com, before a Play release).
 - Verified on 2026-11-18: three GitHub runs passed (one started by the Worker cron: dispatch HTTP 204), an episode built on GitHub played on the Google TV, the Workers AI guard ledger reached the bucket with exact neuron figures.
@@ -29,7 +29,7 @@ Working end to end in the cloud, with no dependence on the user's PC:
 3. Run `python pipeline/housekeeping.py --dry-run`, then the real one; run the `housekeeping` workflow once from the Actions tab; check `logs/` in the bucket.
 4. Check the reconcile probe result (`python pipeline/reconcile.py --probe`); until it agrees, the "ledger matches Cloudflare" claim is unproven. The first plain `reconcile.py` report showed the ledger below Cloudflare (890 vs 280 neurons today) because calls before the guard, and dev-machine runs, were never in the bucket ledger.
 5. Piper fallback voice (edge-tts may be blocked from a runner some day; today it works on GitHub).
-6. Lengthen episodes toward the 4-minute target (fetch article text; RSS summaries are short, episodes are about 2 minutes).
+6. Episode length: now about 4 min (target 4.5 min of script, fuller feed text); check real durations after the next runs.
 7. Test on the Android 10 box (192.168.3.79:5555) when it is connected.
 
 ## Open items and assumptions
@@ -45,7 +45,7 @@ Working end to end in the cloud, with no dependence on the user's PC:
 ## Known issues
 
 - Local small models can add mild commentary; the Workers AI Llama 70B output looked grounded in spot checks, not fully audited.
-- Episodes are about 2 minutes, not 4.
+- Episode length varies about 3.5 to 6 min (6 min ceiling).
 - This ffmpeg build draws a newline in a drawtext text file as a box, so `render.py` draws one line per drawtext; never write text files with `write_text` on Windows (CRLF).
 - GitHub's runner has no Arial, so cloud episodes use DejaVu (look slightly different).
 - The info banner on the TV briefly covers the episode's source line.

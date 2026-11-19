@@ -2,7 +2,7 @@
 id: ai-news
 number: 1
 name: AI News TV
-episode_minutes: 4
+episode_minutes: 4.5   # script target (~675 words); the model varies from about 3.5 to 6 min (6 min ceiling) per episode, 4 min on average
 episodes_per_run: 2
 # Anthropic has no public RSS (404); TechCrunch / The Verge cover it. Verified 2026-11-18.
 max_per_source: 3        # keeps one chatty feed from filling the whole episode
@@ -17,7 +17,7 @@ feeds:
 llm:
   provider: workers-ai        # ollama (local, now) | gemini | groq | workers-ai (cloud, later)
   daily_neuron_budget: 10000   # Workers AI free allocation per 24 h
-  stop_at: 0.9                 # stop at 90% (9,000 neurons) of the ACCOUNT-wide use; voice-ecosystem shares this allowance (was 0.7)
+  stop_at: 0.95                # stop at 95% (9,500 neurons) of the ACCOUNT-wide use; voice-ecosystem shares this allowance (was 0.7, then 0.9)
   model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"   # Workers AI free tier; local alt: provider ollama, model gemma3:4b
 tts:
   provider: edge          # edge | piper | paid

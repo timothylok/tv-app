@@ -6,7 +6,7 @@ costs, and how the free tiers are protected. Facts here were checked against rea
 
 ```
 Cloudflare Worker (cron) ──► GitHub Actions run ──► Cloudflare R2 (static files) ──► Android TV app
-  8am / 2pm / 8pm NZ          ingest → script →         schedule.json, episodes,        reads the schedule,
+  8am / 2pm NZ                ingest → script →         schedule.json, episodes,        reads the schedule,
   + daily housekeeping        voice → render → publish   state, daily logs               plays "what is on now"
 ```
 
@@ -19,7 +19,7 @@ files and the app reads them over HTTPS.
 
 | Cron | NZ summer time | Starts |
 |---|---|---|
-| `0 19,1,7 * * *` | 8am, 2pm, 8pm | `ai-news.yml` (make and publish an episode) |
+| `0 19,1 * * *` | 8am, 2pm | `ai-news.yml` (make and publish an episode) |
 | `30 11 * * *` | 00:30 | `housekeeping.yml` (tidy and measure) |
 
 Each tick calls GitHub's `workflow_dispatch` API; GitHub answers `204` when the run is queued.
@@ -33,7 +33,7 @@ switched off after 60 days without repo activity.
 Both workflows share one concurrency group, so a housekeeping run never overlaps an episode run
 (two writers of `schedule.json` would lose an update).
 
-## 2. The episode run (`pipeline/run.py`, about 2 minutes)
+## 2. The episode run (`pipeline/run.py`, about 2 to 3 minutes of work)
 
 A fresh Ubuntu machine each time, so memory between runs lives in the bucket.
 
@@ -43,7 +43,7 @@ A fresh Ubuntu machine each time, so memory between runs lives in the bucket.
    operations are over 80% of 1,000,000, skip the run with a warning (section 5).
 3. **Ingest** (`ingest.py`): reads the feeds in `channels/ai-news.yaml`; drops items older than 7
    days, already seen, or near-duplicate in title; at most 3 per source; newest first.
-4. **AI guard** (`usage.check`): if Workers AI use is near 90% of the free 10,000 neurons, skip the
+4. **AI guard** (`usage.check`): if Workers AI use is near 95% of the free 10,000 neurons, skip the
    run with a warning (section 4).
 5. **Script** (`script.py`, `llm.py`): the stories go to Cloudflare Workers AI
    (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, free tier). It returns JSON: an episode title and
@@ -56,7 +56,7 @@ A fresh Ubuntu machine each time, so memory between runs lives in the bucket.
 7. **Render** (`render.py`): ffmpeg draws text cards on a plain animated background (no logos, no
    stock images): intro, one card per segment (headline, bullets that appear one by one, a
    "Source: ..." line), outro. Audio is normalised to about -16 LUFS. Output: H.264 High 720p,
-   AAC, `+faststart` (index at the front so streaming starts at once). About 2 minutes, 5 MB.
+   AAC, `+faststart` (index at the front so streaming starts at once). About 4 minutes, 8 to 10 MB.
    One `drawtext` per wrapped line, because this ffmpeg build draws a newline as a box.
 8. **Publish** (`publish.py`): uploads the MP4 first, then appends the episode to
    `channels/ai-news/schedule.json` with absolute start and end times (after the last scheduled
@@ -94,11 +94,11 @@ only real stop is our own code.
   from tokens at the published rate and marked `exact: false`; if it cannot be priced, 1,000
   neurons are charged and an error is logged. **Unknown is never zero.**
 - The window is the trailing 24 hours (the allowance is not a UTC calendar day).
-- The stop line is `stop_at` (90%, so 9,000) of `daily_neuron_budget` (10,000), set in the channel yaml,
+- The stop line is `stop_at` (95%, so 9,500) of `daily_neuron_budget` (10,000), set in the channel yaml,
   with 500 neurons reserved for the call about to be made. The allowance is shared with the active
   project voice-ecosystem (about 3,000 neurons a day, peak 5,100, measured 2026-11-10 to 17). It was
   70% for a day, but account-wide use reached 7,300 on 2026-11-18 (mostly other projects), which would
-  have skipped episodes, so it is now 90%. The cost: at the very top, tv-app plus voice-ecosystem can
+  have skipped episodes, so it was raised to 90%, then 95% on 2026-11-19 so a day of testing did not skip an episode. The cost: at the very top, tv-app plus voice-ecosystem can
   hit 10,000 and voice-ecosystem is the one that then fails. The figure the guard compares is
   account-wide (Cloudflare analytics), so it counts voice-ecosystem's spend; it cannot slow
   voice-ecosystem down.
@@ -178,7 +178,7 @@ Never commit `.env`; never put a token in chat or in a log.
 ## 11. Known gaps
 
 - No Piper fallback voice yet.
-- Episodes are about 2 minutes, not the 4-minute target (RSS summaries are short).
+- Episode length varies (about 3.5 to 6 min, 4 min on average): the model does not hit the word target exactly; the script picks the closest of 3 tries and trims to a hard 6 min ceiling.
 - The Android 10 (API 29) box has not been tested.
 - Dev-machine runs record to a local ledger only; the guard still sees that spend through
   Cloudflare's analytics, and `--probe`/`--reconcile` show any difference.
