@@ -359,6 +359,9 @@ public class TvActivity extends Activity {
         return StatusFormat.day(it.start, now()) + "  ·  " + StatusFormat.minutes(it.end - it.start);
     }
 
+    /** An episode is named by when it was made (NZ time): "Today 8:10 am", never by its internal id. */
+    private String when(ScheduleModel.Item it) { return StatusFormat.day(it.start, now()); }
+
     private String withLabel(String text, String id) {
         String l = watch.label(id);
         return l.isEmpty() ? text : text + "  ·  " + l;
@@ -397,8 +400,8 @@ public class TvActivity extends Activity {
         StringBuilder info = new StringBuilder();
         if (!homeNotice.isEmpty()) info.append(homeNotice).append("\n");
         info.append(latest == null ? "No episodes yet. New ones are made at 8 am and 2 pm."
-                : withLabel("Latest:  Episode " + latest.id + "  ·  " + describe(latest), latest.id));
-        if (resume != null) info.append("\nContinue:  Episode ").append(resume.id).append("  ·  ")
+                : withLabel("Latest:  " + describe(latest), latest.id));
+        if (resume != null) info.append("\nContinue:  ").append(when(resume)).append("  ·  ")
                 .append(WatchState.clock(watch.remaining(resume.id))).append(" remaining");
 
         List<String> labels = new ArrayList<>();
@@ -431,7 +434,7 @@ public class TvActivity extends Activity {
         int sel = 0;
         for (int i = 0; i < choices.size(); i++) {
             ScheduleModel.Item c = choices.get(i);
-            names[i] = withLabel("Episode " + c.id + "\n" + describe(c), c.id);
+            names[i] = withLabel(when(c) + "\n" + StatusFormat.minutes(c.end - c.start), c.id);
             if (vodItem != null && vodItem.id.equals(c.id)) sel = i;
         }
         final int size = px(0.036f);
@@ -513,7 +516,7 @@ public class TvActivity extends Activity {
         if (newer != null) { labels.add("Next  ▶"); actions.add(() -> playEpisode(newer, watch.resumeAt(newer.id))); }
         labels.add("More episodes"); actions.add(this::showEpisodes);
         labels.add("Exit"); actions.add(this::showLeave);
-        showPanel("controls", "Episode " + vodItem.id + "  ·  " + channelName(), timeLine(), progress(), true, true,
+        showPanel("controls", "Episode " + when(vodItem) + "  ·  " + channelName(), timeLine(), progress(), true, true,
                 labels.toArray(new String[0]), actions.toArray(new Runnable[0]), 0);
     }
 
@@ -531,7 +534,7 @@ public class TvActivity extends Activity {
     private void showPaused() {
         if (vodItem == null) return;
         final List<ScheduleModel.Item> av = available();
-        showPanel("paused", "Paused", "Episode " + vodItem.id + "\n" + WatchState.clock(player.getCurrentPosition())
+        showPanel("paused", "Paused", "Episode " + when(vodItem) + "\n" + WatchState.clock(player.getCurrentPosition())
                         + " of " + WatchState.clock(duration()), progress(), false, false,
                 new String[]{"Resume", "Choose episode", "Play latest", "Exit playback"},
                 new Runnable[]{
@@ -571,13 +574,13 @@ public class TvActivity extends Activity {
         String title, info;
         if (latest != null && !latest.id.equals(done.id) && !watch.started(latest.id)) {
             title = "New episode available";
-            info = "Episode " + latest.id + " is now available.";
-            labels.add("Play episode " + latest.id); actions.add(() -> playEpisode(latest, 0));
-            labels.add("Replay episode " + done.id); actions.add(() -> playEpisode(done, 0));
+            info = "The " + when(latest) + " episode is now available.";
+            labels.add("Play the new episode (" + when(latest) + ")"); actions.add(() -> playEpisode(latest, 0));
+            labels.add("Replay the " + when(done) + " episode"); actions.add(() -> playEpisode(done, 0));
         } else {
             title = "Episode complete";
-            info = "Episode " + done.id + " finished.";
-            if (next != null) { labels.add("Play next episode (" + next.id + ")"); actions.add(() -> playEpisode(next, watch.resumeAt(next.id))); }
+            info = "The " + when(done) + " episode finished.";
+            if (next != null) { labels.add("Play next episode (" + when(next) + ")"); actions.add(() -> playEpisode(next, watch.resumeAt(next.id))); }
             if (latest != null && !latest.id.equals(done.id) && (next == null || !latest.id.equals(next.id))) {
                 labels.add("Play latest"); actions.add(() -> playEpisode(latest, 0));
             }
@@ -618,9 +621,9 @@ public class TvActivity extends Activity {
         ScheduleModel s = sched();
         long now = now();
         if (mode == Mode.VOD && vodItem != null) {
-            bannerNow.setText("Episode " + vodItem.id + "  ·  " + describe(vodItem));
+            bannerNow.setText("Episode " + describe(vodItem));
             ScheduleModel.Item nx = ScheduleModel.newer(available(), vodItem.id);
-            bannerNext.setText(nx != null ? "Newer: Episode " + nx.id : "You are watching the latest episode.");
+            bannerNext.setText(nx != null ? "Newer: " + when(nx) : "You are watching the latest episode.");
         } else {
             DateFormat tf = android.text.format.DateFormat.getTimeFormat(this);
             ScheduleModel.Item it = s == null ? null : s.itemAt(now);
@@ -854,13 +857,12 @@ public class TvActivity extends Activity {
     private void updateTopBar(ScheduleModel s, long now, long wall) {
         String have = playingId();
         ScheduleModel.Item last = s.lastStartedBy(now);
-        String ep = have != null ? have : (last == null ? null : last.id);
-        topBar.setText(StatusFormat.topLine(s.updated(), ep, s.aiLeftPct()));
+        ScheduleModel.Item ep = have == null ? null : findIn(s.available(now), have);
+        if (ep == null) ep = last;
+        topBar.setText(StatusFormat.topLine(s.updated(), ep == null ? 0 : ep.start, now, s.aiLeftPct()));
         topBar.setVisibility(View.VISIBLE);
-        int d = px(0.006f);   // drift a few pixels every minute so static text cannot burn in
+        int d = px(0.006f);   // the top line stays put (the user wants it constant); only the menus drift against burn-in
         long m = wall / 60000;
-        topBar.setTranslationX((m % 3) * d);
-        topBar.setTranslationY(((m / 3) % 3) * d);
         if (!panelKind.isEmpty() && !"controls".equals(panelKind)) {
             panel.setTranslationX((m % 3 - 1) * d);
             panel.setTranslationY(((m / 3) % 3 - 1) * d);

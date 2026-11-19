@@ -168,8 +168,8 @@ next, play latest, replay, choose, return); nothing starts by itself and a new e
 interrupts. Channel up/down still gives **live TV**: "now" is the server's HTTP `Date` header, it
 plays the item with `start <= now < end` at the right offset, re-syncs every 2 seconds and queues
 a following item for a seamless switch. The schedule is re-fetched every 60 seconds. A thin
-top-left line is always on: episode id, the schedule's `updated` time in NZ time and
-`ai.left_pct` (free Workers AI left, account-wide, written at each publish); it and the menus
+top-left line is always on: episode (named by its NZ creation time), the schedule's `updated` time in NZ time and
+`ai.left_pct` (free Workers AI left, account-wide, written at each publish), in a fixed place; the menus
 drift a few pixels a minute against burn-in, and the screen-on flag is held only while video
 plays. See `usermanual.md` for the keys.
 

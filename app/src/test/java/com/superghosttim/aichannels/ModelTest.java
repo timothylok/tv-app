@@ -171,8 +171,8 @@ public class ModelTest {
         assertEquals("Updated 19 Nov 2026, 8:04 am NZDT  |  Episode 20261118-1902  |  AI free left 94%",
                 StatusFormat.line(1795028655550L, "20261118-1902", 94));
         assertEquals("Updated: unknown  |  AI free left unknown", StatusFormat.line(0, null, -1));
-        assertEquals("Episode 20261118-1902  |  Updated 19 Nov 2026, 8:04 am NZDT  |  AI free left 94%",
-                StatusFormat.topLine(1795028655550L, "20261118-1902", 94));
-        assertEquals("Updated: unknown  |  AI free left unknown", StatusFormat.topLine(0, null, -1));
+        assertEquals("Episode Today 2:21 pm  |  Updated 19 Nov 2026, 8:04 am NZDT  |  AI free left 94%",
+                StatusFormat.topLine(1795028655550L, 1795051289000L, 1795051289000L + 60_000, 94));
+        assertEquals("Updated: unknown  |  AI free left unknown", StatusFormat.topLine(0, 0, 0, -1));
     }
 }

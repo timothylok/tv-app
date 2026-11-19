@@ -2,7 +2,7 @@
 
 Open **AI Channels** from the Android TV home screen. It opens on a short menu for the channel you watched last (AI News TV). New episodes are made twice a day, at about 8 am and 2 pm New Zealand time.
 
-A thin line at the top left is always on: the episode id, when the channel was last updated (New Zealand time) and how much of the free AI allowance is left. It moves a few pixels every minute so it cannot burn into the screen.
+A thin line at the top left is always on: the episode (named by the New Zealand time it was made, for example "Today 8:10 am"), when the channel was last updated (New Zealand time) and how much of the free AI allowance is left..
 
 ## Home menu
 | Button | What it does |
@@ -15,7 +15,7 @@ A thin line at the top left is always on: the episode id, when the channel was l
 The highlighted button is the one you most likely want: **Play latest** when there is a new episode, otherwise **Continue watching** if you stopped part-way, otherwise **Play latest** or **All episodes**. The menu updates by itself when a new episode arrives.
 
 ## Episode list
-Each row shows the episode id, when it was made ("Today 8:10 am", "Yesterday 2:21 pm"), its length and **New**, **N% watched** or **Watched**. Up/down to move, OK to play (a part-watched episode carries on where you stopped). Back closes the list and changes nothing.
+Episodes are named by when they were made in New Zealand time ("Today 8:10 am", "Yesterday 2:21 pm", "18 Nov 10:40 pm"), never by a code. Each row shows that time, the length and **New**, **N% watched** or **Watched**. Up/down to move, OK to play (a part-watched episode carries on where you stopped). Back closes the list and changes nothing.
 
 ## While an episode plays
 | Key | What it does |

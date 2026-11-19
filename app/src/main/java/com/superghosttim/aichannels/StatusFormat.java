@@ -45,10 +45,11 @@ public final class StatusFormat {
     /** "2 min" (at least 1). */
     public static String minutes(long durMs) { return Math.max(1, Math.round(durMs / 60000.0)) + " min"; }
 
-    /** The always-on top line: "Episode 20261118-1902  |  Updated 19 Nov 2026, 8:04 am NZDT  |  AI free left 94%". */
-    public static String topLine(long updated, String episodeId, int aiLeftPct) {
+    /** The always-on top line: "Episode Today 8:10 am  |  Updated 19 Nov 2026, 8:04 am NZDT  |  AI free left 94%".
+     *  The episode is named by when it was made (New Zealand time), never by its internal id. */
+    public static String topLine(long updated, long episodeStart, long nowMs, int aiLeftPct) {
         StringBuilder sb = new StringBuilder();
-        if (episodeId != null && !episodeId.isEmpty()) sb.append("Episode ").append(episodeId).append("  |  ");
+        if (episodeStart > 0) sb.append("Episode ").append(day(episodeStart, nowMs)).append("  |  ");
         sb.append(updated > 0 ? "Updated " + nz(updated) : "Updated: unknown");
         sb.append("  |  AI free left ").append(aiLeftPct >= 0 ? aiLeftPct + "%" : "unknown");
         return sb.toString();
