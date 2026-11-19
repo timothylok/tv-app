@@ -42,6 +42,13 @@ public final class StatusFormat {
         return dm.format(new Date(epochMs)) + " " + time;
     }
 
+    /** The episode's own title, or "" when it is blank or the old generic "AI News Update". */
+    public static String cleanTitle(String t) {
+        if (t == null) return "";
+        t = t.trim();
+        return t.isEmpty() || t.equalsIgnoreCase("AI News Update") || t.equalsIgnoreCase("AI news update") ? "" : t;
+    }
+
     /** "2 min" (at least 1). */
     public static String minutes(long durMs) { return Math.max(1, Math.round(durMs / 60000.0)) + " min"; }
 

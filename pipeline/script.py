@@ -97,6 +97,10 @@ def build_script(channel, stories):
         for sg in best[1]["segments"]:
             sg["narration"] = _cap_words(sg["narration"], max(20, int(len(sg["narration"].split()) * ratio)))
         log("script", f"over the {MAX_MINUTES} min ceiling ({total} words): trimmed to {_words(best)}")
+    # The model's own title is always generic ("AI News Update"): name the episode by its lead stories so a long list is browsable.
+    heads = [sg["headline"] for sg in best[1]["segments"][:2] if sg["headline"]]
+    if heads:
+        best[1]["title"] = _trim(" · ".join(heads), 80)
     return best[1]
 
 

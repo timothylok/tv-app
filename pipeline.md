@@ -61,7 +61,7 @@ A fresh Ubuntu machine each time, so memory between runs lives in the bucket.
 8. **Publish** (`publish.py`): uploads the MP4 first, then appends the episode to
    `channels/ai-news/schedule.json` with absolute start and end times (after the last scheduled
    item, or at least 90 seconds from now). Updates `channels.json`, makes the looping filler clip
-   if missing, and drops items that ended over 48 hours ago together with their MP4s.
+   if missing, and drops items that ended over 30 days ago (`KEEP_HOURS`) together with their MP4s.
 9. **Push state** (`publish.push_state`): writes the seen list and AI ledger back, folds this run's
    R2 operation counts into the month counters, and merges this run's events into the daily audit
    logs. This also runs if publishing failed, so spend is never lost.
@@ -74,7 +74,7 @@ Public read through the `r2.dev` address, no server code.
 |---|---|
 | `channels.json` | the channel line-up |
 | `channels/<id>/schedule.json` | items `{id, title, url, start, end, duration}` in epoch milliseconds, plus the filler URL |
-| `channels/<id>/episodes/<id>.mp4` | episodes (about 48 hours of them) |
+| `channels/<id>/episodes/<id>.mp4` | episodes (about 30 days of them) |
 | `channels/<id>/filler.mp4` | the "next episode coming up" loop |
 | `state/seen.json`, `state/ai-usage.json`, `state/r2-ops.json` | memory between runs |
 | `logs/ai/<date>.jsonl`, `logs/r2/<date>.jsonl` | daily audit logs (section 6) |
@@ -114,8 +114,8 @@ Free tier (Cloudflare's published pricing; confirm in the dashboard): 10 GB-mont
 1,000,000 Class A operations a month (PUT, LIST, COPY), 10,000,000 Class B (GET, HEAD), no egress
 fees, DELETE free.
 
-- **Storage:** measured exactly by listing the bucket. About 5 MB per episode and about 48 hours
-  kept means tens of MB, far below 10 GB. The run stops at 80%.
+- **Storage:** measured exactly by listing the bucket. About 5 to 10 MB per episode and about 30 days
+  kept (about 60 episodes) means roughly 0.5 GB, 5% of 10 GB; the title of a new episode is its two lead headlines. The run stops at 80%.
 - **Our operations:** every bucket call goes through `publish.Publisher`, which counts it by class
   and writes an audit event. Month totals are kept in `state/r2-ops.json`. A normal run is about
   20 operations, so a month is a few thousand against 1,000,000.
@@ -127,7 +127,7 @@ fees, DELETE free.
 
 Runs daily at 00:30 NZ. `--dry-run` shows what it would delete and changes nothing remote.
 
-1. Drops schedule items that ended over 48 hours ago and deletes their MP4s.
+1. Drops schedule items that ended over 30 days ago and deletes their MP4s.
 2. Deletes orphan episode files: not referenced by any schedule item and older than 2 hours (so an
    upload in progress is safe). Unknown channels and the filler are left alone.
 3. Measures storage and the month's operations; writes `daily-summary` lines to both logs.
@@ -159,7 +159,7 @@ expiry, so renew it).
 
 On launch it fetches `channels.json`, then the channel's schedule, and opens a **home menu**:
 Play latest, Continue watching (only when something is part-watched), All episodes (everything
-the schedule still holds, about 48 hours, newest first, labelled New / N% watched / Watched) and
+the schedule still holds, about 30 days, newest first, labelled New / N% watched / Watched) and
 Watch live now (only while an episode is on air). Episodes play **on demand**: resume positions
 and watched state live in `WatchState` (plain Java, unit-tested), saved as JSON in
 SharedPreferences every 10 s, on pause, on Back and on stop. OK shows the controls, Play/Pause

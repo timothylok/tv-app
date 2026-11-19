@@ -9,7 +9,7 @@ A thin line at the top left shows the episode (named by the New Zealand time it 
 |---|---|
 | Play latest episode | Starts the newest episode from the beginning |
 | Continue watching | Shown only when you have a part-watched episode: carries on where you stopped |
-| All episodes | Browse the episodes still available (about two days now): week, then day, then morning or afternoon/evening (AM/PM), then the episodes. Levels with only one choice are skipped |
+| All episodes | Browse the episodes still available (about 30 days): week, then day, then morning or afternoon/evening (AM/PM), then the episodes. Levels with only one choice are skipped |
 | Top line: N seconds | Settings: press OK to cycle how long the top-left line stays up after a key press: off, 5, 10, 30, 60 seconds or always on |
 | Watch live now | Shown only while an episode is on air: joins it at the live point, like TV |
 

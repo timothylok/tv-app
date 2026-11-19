@@ -372,6 +372,12 @@ public class TvActivity extends Activity {
     /** An episode is named by when it was made (NZ time): "Today 8:10 am", never by its internal id. */
     private String when(ScheduleModel.Item it) { return StatusFormat.day(it.start, now()); }
 
+    /** The episode's title on its own line ("\n" + title), or "" for the old generic title. */
+    private String titleLine(ScheduleModel.Item it) {
+        String t = StatusFormat.cleanTitle(it.title);
+        return t.isEmpty() ? "" : "\n" + t;
+    }
+
     private String withLabel(String text, String id) {
         String l = watch.label(id);
         return l.isEmpty() ? text : text + "  ·  " + l;
@@ -410,7 +416,7 @@ public class TvActivity extends Activity {
         StringBuilder info = new StringBuilder();
         if (!homeNotice.isEmpty()) info.append(homeNotice).append("\n");
         info.append(latest == null ? "No episodes yet. New ones are made at 8 am and 2 pm."
-                : withLabel("Latest:  " + describe(latest), latest.id));
+                : withLabel("Latest:  " + describe(latest), latest.id) + titleLine(latest));
         if (resume != null) info.append("\nContinue:  ").append(when(resume)).append("  ·  ")
                 .append(WatchState.clock(watch.remaining(resume.id))).append(" remaining");
 
@@ -490,7 +496,7 @@ public class TvActivity extends Activity {
             if (choices.isEmpty()) names[0] = "No episodes yet";
             for (int i = 0; i < choices.size(); i++) {
                 ScheduleModel.Item c = choices.get(i);
-                names[i] = withLabel(when(c) + "\n" + StatusFormat.minutes(c.end - c.start), c.id);
+                names[i] = withLabel(when(c) + titleLine(c) + "\n" + StatusFormat.minutes(c.end - c.start), c.id);
                 if (vodItem != null && vodItem.id.equals(c.id)) sel = i;
             }
         } else {
@@ -684,7 +690,7 @@ public class TvActivity extends Activity {
         ScheduleModel s = sched();
         long now = now();
         if (mode == Mode.VOD && vodItem != null) {
-            bannerNow.setText("Episode " + describe(vodItem));
+            bannerNow.setText("Episode " + describe(vodItem) + titleLine(vodItem).replace("\n", "  ·  "));
             ScheduleModel.Item nx = ScheduleModel.newer(available(), vodItem.id);
             bannerNext.setText(nx != null ? "Newer: " + when(nx) : "You are watching the latest episode.");
         } else {

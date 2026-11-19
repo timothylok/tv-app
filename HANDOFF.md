@@ -38,7 +38,7 @@ Working end to end in the cloud, with no dependence on the user's PC:
 - **Expiring tokens:** the Worker's GitHub token (`GITHUB_TOKEN`, fine-grained, Actions read/write, this repo only) expires 2026-12-18; the analytics token was created with a 90-day expiry (about 2027-02-16). Renew both: the Worker stops starting runs silently otherwise.
 - **Secrets** live only in `.env` (git-ignored; also `.env.bak`, `.env.*` ignored), GitHub Actions secrets and the Worker secret. Names: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ANALYTICS_TOKEN`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL`. Never paste them in chat.
 - The bucket is public, so `state/` and `logs/` are readable by anyone (counts and names only).
-- The bucket still holds old test items (`Test episode`, `Live test episode`); they age out after 48 hours.
+- The bucket still holds old test items (`Test episode`, `Live test episode`); they age out after 30 days.
 - Feeds in `channels/ai-news.yaml` verified 2026-11-18 (Anthropic has no public RSS; Microsoft is the general feed, not AI-only).
 - The commit history was rewritten once to remove the user's personal email from the author field (now the GitHub no-reply address `9313302+timothylok@users.noreply.github.com`, set in the local git config). Do not commit with the personal address again.
 

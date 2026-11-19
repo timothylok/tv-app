@@ -19,7 +19,7 @@ import auditlog
 import r2usage
 from common import STATE_DIR, duration, load_env, load_json, log, save_json
 
-KEEP_HOURS = 48          # items that ended longer ago than this are pruned
+KEEP_HOURS = 24 * 30     # items that ended longer ago than this are pruned (30 days: about 0.5 GB of the 10 GB free)
 LEAD_SECONDS = 90        # a new item never starts sooner than this after publishing
 MP4_CACHE = "public, max-age=31536000, immutable"
 JSON_CACHE = "max-age=30"
