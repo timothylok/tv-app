@@ -93,6 +93,25 @@ public final class ScheduleModel {
         return null;
     }
 
+    /** Episodes that started within the last `windowMs` (including the one on air), newest first. */
+    public List<Item> recent(long now, long windowMs) {
+        List<Item> out = new ArrayList<>();
+        for (int i = items.size() - 1; i >= 0; i--) {
+            Item it = items.get(i);
+            if (it.start <= now && it.start >= now - windowMs) out.add(it);
+        }
+        return out;
+    }
+
+    /** The episode to replay after `afterId` (the next older one, wrapping to the newest), or null if the list is empty. */
+    public static Item nextReplay(List<Item> newestFirst, String afterId) {
+        if (newestFirst.isEmpty()) return null;
+        for (int i = 0; i < newestFirst.size(); i++) {
+            if (newestFirst.get(i).id.equals(afterId)) return newestFirst.get((i + 1) % newestFirst.size());
+        }
+        return newestFirst.get(0);
+    }
+
     /** True when b starts within 1.5 s of a's end, so the two can be queued back to back. */
     public static boolean contiguous(Item a, Item b) {
         return a != null && b != null && Math.abs(b.start - a.end) <= 1500;

@@ -101,6 +101,24 @@ public class ModelTest {
         assertEquals(-1, ScheduleModel.parse("{\"ai\":{\"left_pct\":250},\"items\":[]}").aiLeftPct());
     }
 
+    @Test public void recentEpisodesAreNewestFirstWithin24h() {
+        long h = 3600_000L;
+        ScheduleModel s = ScheduleModel.parse("{\"items\":["
+                + "{\"id\":\"old\",\"url\":\"https://x.test/o.mp4\",\"start\":" + 0 + ",\"end\":" + 1000 + "},"
+                + "{\"id\":\"a\",\"url\":\"https://x.test/a.mp4\",\"start\":" + 30 * h + ",\"end\":" + (30 * h + 1000) + "},"
+                + "{\"id\":\"b\",\"url\":\"https://x.test/b.mp4\",\"start\":" + 40 * h + ",\"end\":" + (40 * h + 1000) + "},"
+                + "{\"id\":\"future\",\"url\":\"https://x.test/f.mp4\",\"start\":" + 60 * h + ",\"end\":" + (60 * h + 1000) + "}]}");
+        java.util.List<ScheduleModel.Item> r = s.recent(50 * h, 24 * h);
+        assertEquals(2, r.size());                  // 'old' is over 24 h ago, 'future' has not started
+        assertEquals("b", r.get(0).id);
+        assertEquals("a", r.get(1).id);
+        assertEquals("a", ScheduleModel.nextReplay(r, "b").id);   // next older
+        assertEquals("b", ScheduleModel.nextReplay(r, "a").id);   // wraps to the newest
+        assertEquals("b", ScheduleModel.nextReplay(r, "gone").id);
+        assertNull(ScheduleModel.nextReplay(new java.util.ArrayList<ScheduleModel.Item>(), "a"));
+        assertEquals("19 Nov, 2:21 pm", StatusFormat.nzShort(1795051289000L));
+    }
+
     @Test public void statusLineUsesNewZealandTime() {
         // 2026-11-18 19:04 UTC = 19 Nov 08:04 NZDT (UTC+13); 2026-07-01 00:00 UTC = 12:00 pm NZST (UTC+12)
         assertEquals("19 Nov 2026, 8:04 am NZDT", StatusFormat.nz(1795028655550L));

@@ -19,6 +19,13 @@ public final class StatusFormat {
         return s + (nz.inDaylightTime(new Date(epochMs)) ? " NZDT" : " NZST");
     }
 
+    /** "19 Nov, 2:21 pm" in New Zealand time, for the episode list. */
+    public static String nzShort(long epochMs) {
+        SimpleDateFormat f = new SimpleDateFormat("d MMM, h:mm a", Locale.ENGLISH);
+        f.setTimeZone(TimeZone.getTimeZone("Pacific/Auckland"));
+        return f.format(new Date(epochMs)).replace(" AM", " am").replace(" PM", " pm");
+    }
+
     /** One line: "Updated 19 Nov 2026, 8:04 am NZDT | Episode 20261118-1902 | AI free left 94%". */
     public static String line(long updated, String episodeId, int aiLeftPct) {
         StringBuilder sb = new StringBuilder();

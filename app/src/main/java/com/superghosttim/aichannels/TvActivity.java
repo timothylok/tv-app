@@ -34,8 +34,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.Charset;
 import java.text.DateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,6 +51,7 @@ public class TvActivity extends Activity {
     private static final String TAG = "AITV";
     private static final String FILLER_ID = "filler";
     private static final long TICK_MS = 2000;
+    private static final long RECENT_MS = 24L * 3600 * 1000;   // episodes you can watch again
     private static final long SCHEDULE_REFRESH_MS = 60_000;
     private static final long GAP_REFRESH_MS = 10_000;
     private static final long DRIFT_LIMIT_MS = 5000;
@@ -66,6 +69,10 @@ public class TvActivity extends Activity {
     private long lastRefresh = 0;
     private long retryAt = 0;            // after a player error, wait before reloading
     private boolean started = false;
+    private String replayId;                 // episode being watched again (in a gap, or picked from the list)
+    private boolean replayChosen;            // picked by the viewer: keep playing it even if it is also on air now
+    private List<ScheduleModel.Item> choices = new ArrayList<>();
+    private boolean listIsEpisodes;
 
     private TextView osdNumber, status, bannerChannel, bannerNow, bannerNext, bannerStatus;
     private View banner;
@@ -194,7 +201,8 @@ public class TvActivity extends Activity {
         list.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
             @Override public void onItemClick(android.widget.AdapterView<?> p, View v, int pos, long id) {
                 hideList();
-                tuneTo(pos);
+                if (listIsEpisodes) { if (pos >= 0 && pos < choices.size()) playReplay(choices.get(pos)); }
+                else tuneTo(pos);
             }
         });
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
@@ -208,6 +216,30 @@ public class TvActivity extends Activity {
         if (channels.size() == 0) return;
         String[] names = new String[channels.size()];
         for (int i = 0; i < names.length; i++) names[i] = channels.get(i).number + "   " + channels.get(i).name;
+        listIsEpisodes = false;
+        fillList(names, Math.max(0, current));
+    }
+
+    /** Episodes of the last 24 hours, newest first; OK plays the chosen one from the start. */
+    private void showEpisodes() {
+        if (current < 0 || current >= channels.size()) return;
+        ScheduleModel s = schedules.get(channels.get(current).id);
+        if (s == null) return;
+        long now = clock.now(System.currentTimeMillis());
+        choices = s.recent(now, RECENT_MS);
+        ScheduleModel.Item live = s.itemAt(now);
+        String[] names = new String[Math.max(1, choices.size())];
+        if (choices.isEmpty()) names[0] = "No episodes in the last 24 hours";
+        for (int i = 0; i < choices.size(); i++) {
+            ScheduleModel.Item c = choices.get(i);
+            names[i] = StatusFormat.nzShort(c.start) + "   " + c.title
+                    + (live != null && live.id.equals(c.id) ? "   (on air)" : "");
+        }
+        listIsEpisodes = true;
+        fillList(names, 0);
+    }
+
+    private void fillList(String[] names, int selected) {
         final int size = px(0.045f);
         list.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, names) {
             @Override public View getView(int pos, View v, ViewGroup parent) {
@@ -219,7 +251,7 @@ public class TvActivity extends Activity {
             }
         });
         list.setVisibility(View.VISIBLE);
-        list.setSelection(Math.max(0, current));
+        list.setSelection(selected);
         list.requestFocus();
     }
 
@@ -236,7 +268,10 @@ public class TvActivity extends Activity {
         bannerChannel.setText("CH " + ch.number + "   " + ch.name);
         ScheduleModel.Item it = s == null ? null : s.itemAt(now);
         ScheduleModel.Item next = s == null ? null : s.nextAfter(now);
-        bannerNow.setText(it != null ? "Now: " + it.title + "  (until " + tf.format(new Date(it.end)) + ")"
+        ScheduleModel.Item rp = replayId == null || s == null ? null : findIn(s.recent(now, RECENT_MS), replayId);
+        bannerNow.setText(rp != null && (replayChosen || it == null)
+                ? "Watching again: " + rp.title + "  (from " + StatusFormat.nzShort(rp.start) + ")"
+                : it != null ? "Now: " + it.title + "  (until " + tf.format(new Date(it.end)) + ")"
                 : "Next episode coming up shortly");
         bannerNext.setText(next != null ? "Next: " + next.title + "  at " + tf.format(new Date(next.start)) : "");
         bannerNext.setVisibility(next != null ? View.VISIBLE : View.GONE);
@@ -266,6 +301,11 @@ public class TvActivity extends Activity {
             case KeyEvent.KEYCODE_CHANNEL_DOWN:
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 if (channels.size() > 0) tuneTo(channels.down(current));
+                return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+            case KeyEvent.KEYCODE_MENU:
+            case KeyEvent.KEYCODE_GUIDE:
+                showEpisodes();
                 return true;
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
@@ -366,6 +406,8 @@ public class TvActivity extends Activity {
         if (idx < 0 || idx >= channels.size()) return;
         current = idx;
         generation++;
+        replayId = null;
+        replayChosen = false;
         prefs.edit().putString("last", channels.get(idx).id).apply();
         digits.setLength(0);
         retryAt = 0;
@@ -412,6 +454,30 @@ public class TvActivity extends Activity {
 
     // ------------------------------------------------------------------ playback: one idempotent "make the player match the schedule"
 
+    private static ScheduleModel.Item findIn(List<ScheduleModel.Item> l, String id) {
+        for (ScheduleModel.Item i : l) if (i.id.equals(id)) return i;
+        return null;
+    }
+
+    private void loadReplay(ScheduleModel.Item r) {
+        player.setMediaItem(new MediaItem.Builder().setMediaId(r.id).setUri(r.url).build());
+        player.setRepeatMode(Player.REPEAT_MODE_OFF);
+        player.prepare();
+        player.seekTo(0, 0);
+        player.play();
+        Log.i(TAG, "watching again: " + r.id);
+    }
+
+    /** The viewer picked an episode from the list: play it from the start. */
+    private void playReplay(ScheduleModel.Item r) {
+        replayId = r.id;
+        replayChosen = true;
+        retryAt = 0;
+        setStatus("");
+        loadReplay(r);
+        showBanner();
+    }
+
     private String playingId() {
         MediaItem mi = player.getCurrentMediaItem();
         return mi == null ? null : mi.mediaId;
@@ -427,10 +493,17 @@ public class TvActivity extends Activity {
         if (s == null) { setStatus("Loading schedule..."); return; }
         long now = clock.now(wall);
         ScheduleModel.Item it = s.itemAt(now);
+        boolean ended = player.getPlaybackState() == Player.STATE_ENDED;
+        if (replayId != null && replayChosen && replayId.equals(playingId()) && !ended
+                && (it == null || it.id.equals(replayId))) {
+            return;   // the viewer picked this episode: let it play to the end (even if it is also on air now)
+        }
         if (it != null) {
+            replayId = null;          // live takes over from any replay
+            replayChosen = false;
             setStatus("");
             String have = playingId();
-            if (!it.id.equals(have)) {
+            if (!it.id.equals(have) || ended) {
                 player.setRepeatMode(Player.REPEAT_MODE_OFF);
                 player.setMediaItem(new MediaItem.Builder().setMediaId(it.id).setUri(it.url).build());
                 ScheduleModel.Item next = s.nextAfter(now);
@@ -459,7 +532,21 @@ public class TvActivity extends Activity {
             }
             return;
         }
-        // gap: loop the filler (or wait) until the next program
+        // gap: watch the recent episodes again (newest first, then the older ones) until the next one is on air
+        List<ScheduleModel.Item> recent = s.recent(now, RECENT_MS);
+        if (!recent.isEmpty()) {
+            ScheduleModel.Item r = replayId == null ? null : findIn(recent, replayId);
+            boolean replaying = r != null && r.id.equals(playingId());
+            if (r == null) r = recent.get(0);                                          // nothing chosen yet: the newest
+            else if (replaying && ended) r = ScheduleModel.nextReplay(recent, r.id);   // finished: the next one
+            if (!r.id.equals(playingId()) || ended) { replayChosen = false; loadReplay(r); }
+            else if (!player.isPlaying() && player.getPlaybackState() == Player.STATE_READY) player.play();
+            replayId = r.id;
+            setStatus("");
+            if (wall - lastRefresh > GAP_REFRESH_MS) refreshSchedule(true);
+            return;
+        }
+        // nothing recent at all: loop the filler (or wait)
         if (s.filler() == null) { setStatus("Next episode coming up shortly"); return; }
         setStatus("");
         if (!FILLER_ID.equals(playingId())) {
