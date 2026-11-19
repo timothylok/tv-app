@@ -1,6 +1,8 @@
 """Step 2: turn fresh stories into a structured episode script (own words, cited)."""
 import time
 
+import auditlog
+
 from common import clean_text, log
 from llm import generate_json
 from usage import BudgetExceeded
@@ -65,6 +67,7 @@ def build_script(channel, stories):
     words_each = int(minutes * WORDS_PER_MIN / n_segments)
     log("script", f"asking {channel['llm'].get('model', 'ollama')} for {n_segments} segments")
     best = None
+    tries = []
     for attempt in range(1, 4):  # small local models are flaky: retry, keep the best try
         try:
             raw = generate_json(channel["llm"], SYSTEM,
@@ -75,7 +78,8 @@ def build_script(channel, stories):
         except Exception as e:  # bad JSON, timeout, connection: try again
             log("script", f"attempt {attempt} failed: {e}")
             continue
-        log("script", f"attempt {attempt}: {len(result[1]['segments'])}/{n_segments} usable segments")
+        log("script", f"attempt {attempt}: {len(result[1]['segments'])}/{n_segments} usable segments, {_words(result)} words")
+        tries.append(_words(result))
         target = minutes * WORDS_PER_MIN
         if best is None or abs(_words(result) - target) < abs(_words(best) - target):
             best = result   # the try closest to the target length (models both under- and overshoot)
@@ -84,6 +88,8 @@ def build_script(channel, stories):
     log("script", f"best try: {_words(best) if best else 0} words (~{(_words(best) if best else 0) / WORDS_PER_MIN:.1f} min) for a {minutes} min target")
     if best is None or not best[1]["segments"]:
         raise RuntimeError("LLM returned no usable segments")
+    auditlog.event("ai", event="script", stories=len(stories), asked_segments=n_segments, asked_words=int(minutes * WORDS_PER_MIN),
+                   words_per_try=tries, chosen_words=_words(best))   # so a short episode can be explained afterwards
     best[1]["segments"] = best[1]["segments"][:MAX_SEGMENTS]  # some models ignore the count
     total = _words(best)
     if total > MAX_MINUTES * WORDS_PER_MIN:   # hard ceiling: shrink every segment in proportion, cutting at a sentence end
