@@ -653,9 +653,8 @@ public class TvActivity extends Activity {
         persistWatch();
         final List<ScheduleModel.Item> av = available();
         final ScheduleModel.Item latest = av.isEmpty() ? null : av.get(0);
-        ScheduleModel.Item nx = ScheduleModel.newer(av, done.id);
-        if (nx == null) nx = ScheduleModel.older(av, done.id);
-        final ScheduleModel.Item next = nx;
+        final ScheduleModel.Item next = ScheduleModel.newer(av, done.id);   // "next" is always the one made after this one
+        final ScheduleModel.Item earlier = next == null ? ScheduleModel.older(av, done.id) : null;   // watching the newest: offer the one before it, named as such
         List<String> labels = new ArrayList<>();
         List<Runnable> actions = new ArrayList<>();
         String title, info;
@@ -668,6 +667,7 @@ public class TvActivity extends Activity {
             title = "Episode complete";
             info = "The " + when(done) + " episode finished.";
             if (next != null) { labels.add("Play next episode (" + when(next) + ")"); actions.add(() -> playEpisode(next, watch.resumeAt(next.id))); }
+            else if (earlier != null) { labels.add("Play earlier episode (" + when(earlier) + ")"); actions.add(() -> playEpisode(earlier, watch.resumeAt(earlier.id))); }
             if (latest != null && !latest.id.equals(done.id) && (next == null || !latest.id.equals(next.id))) {
                 labels.add("Play latest"); actions.add(() -> playEpisode(latest, 0));
             }

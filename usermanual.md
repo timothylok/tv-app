@@ -34,7 +34,7 @@ Back goes up one level; at the top it closes the list. Each group shows how many
 
 Your position is saved as you watch (every 10 seconds, on pause, on Back and on Home), also if the box restarts. Within the last 20 seconds an episode counts as watched.
 
-When an episode ends, nothing starts by itself. You choose: **Play next episode**, **Play latest**, **Replay**, **Choose episode** or **Return to menu**. If a newer episode came out while you watched, the screen says so and offers it first.
+When an episode ends, nothing starts by itself. You choose: **Play next episode** (the one made after it; if you just watched the newest, it offers **Play earlier episode** instead), **Play latest**, **Replay**, **Choose episode** or **Return to menu**. If a newer episode came out while you watched, the screen says so and offers it first.
 
 ## Live TV
 Channel up/down (or **Watch live now** on the home menu) plays what is on air right now, in sync on every TV. Channel and D-pad up/down switch channel, number keys jump to a channel, OK shows what is on and what is next, D-pad right opens the episode list, Back returns to the home menu. If nothing is on air you go back to the home menu with "Nothing is live right now".
