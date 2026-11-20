@@ -9,6 +9,7 @@ from usage import BudgetExceeded
 
 WORDS_PER_MIN = 150
 MAX_SEGMENTS = 10
+ASK_FACTOR = 1.7   # the model writes only ~55-60% of the words it is asked for, so ask for more
 MAX_MINUTES = 6   # hard ceiling on spoken length (about 900 words)
 
 SYSTEM = (
@@ -64,7 +65,7 @@ def build_script(channel, stories):
         raise RuntimeError("no fresh stories to write about")
     minutes = channel.get("episode_minutes", 4)
     n_segments = max(1, min(len(stories), round(minutes * 60 / 35)))  # ~35 s per segment: more, shorter segments reach the target length more reliably
-    words_each = int(minutes * WORDS_PER_MIN / n_segments)
+    words_each = int(minutes * WORDS_PER_MIN * ASK_FACTOR / n_segments)
     log("script", f"asking {channel['llm'].get('model', 'ollama')} for {n_segments} segments")
     best = None
     tries = []
@@ -88,7 +89,7 @@ def build_script(channel, stories):
     log("script", f"best try: {_words(best) if best else 0} words (~{(_words(best) if best else 0) / WORDS_PER_MIN:.1f} min) for a {minutes} min target")
     if best is None or not best[1]["segments"]:
         raise RuntimeError("LLM returned no usable segments")
-    auditlog.event("ai", event="script", stories=len(stories), asked_segments=n_segments, asked_words=int(minutes * WORDS_PER_MIN),
+    auditlog.event("ai", event="script", stories=len(stories), asked_segments=n_segments, asked_words=int(minutes * WORDS_PER_MIN * ASK_FACTOR), target_words=int(minutes * WORDS_PER_MIN),
                    words_per_try=tries, chosen_words=_words(best))   # so a short episode can be explained afterwards
     best[1]["segments"] = best[1]["segments"][:MAX_SEGMENTS]  # some models ignore the count
     total = _words(best)

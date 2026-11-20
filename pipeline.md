@@ -187,7 +187,7 @@ Never commit `.env`; never put a token in chat or in a log.
 ## 11. Known gaps
 
 - No Piper fallback voice yet.
-- Episode length varies (about 3.5 to 6 min, 4 min on average): the model does not hit the word target exactly; the script picks the closest of 3 tries and trims to a hard 6 min ceiling.
+- Episode length varies (about 3.5 to 6 min, 4 min on average): the model writes only about 55-60% of the words it is asked for, so `script.py` asks for 1.7 times the target (`ASK_FACTOR`); the script picks the closest of 3 tries and trims to a hard 6 min ceiling.
 - The Android 10 (API 29) box has not been tested.
 - Dev-machine runs record to a local ledger only; the guard still sees that spend through
   Cloudflare's analytics, and `--probe`/`--reconcile` show any difference.
