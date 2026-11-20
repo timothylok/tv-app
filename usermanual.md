@@ -2,7 +2,7 @@
 
 Open **AI Channels** from the Android TV home screen. It opens on a short menu for the channel you watched last (AI News TV). New episodes are made twice a day, at about 8 am and 2 pm New Zealand time.
 
-Each story card in the video has a QR code at the bottom right: scan it with your phone to read the source story.
+Each story card in the video has a QR code at the top right, level with the headline: scan it with your phone to read the source story.
 
 A thin line at the top left shows the episode (named by the New Zealand time it was made, for example "Today 8:10 am"), when the channel was last updated (New Zealand time) and how much of the free AI allowance is left. It appears when the app opens and whenever you press a key, and hides itself after 10 seconds (change this on the home menu: off, 5, 10, 30, 60 seconds or always on) so it cannot burn into the screen.
 

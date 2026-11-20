@@ -7,6 +7,7 @@ from pathlib import Path
 from common import clean_text, duration, ffmpeg, log
 
 FPS = 25
+QR_Y = 98     # top of the QR = top of the headline letters
 QR_PX = 240   # about this many pixels square on the 1280x720 card (big enough to scan from a sofa)
 PAD = 0.8  # seconds of breathing room after each narrated segment
 FONTS = [
@@ -51,7 +52,7 @@ def _qr(work, name, link):
         scale = max(2, QR_PX // (modules + 6))
         out = f"{name}_qr.png"
         code.save(str(work / out), kind="png", scale=scale, border=3, dark="black", light="white")
-        return out
+        return out, (modules + 6) * scale
     except Exception as e:   # noqa: BLE001
         log("render", f"WARNING no QR for {name}: {e}")
         return None
@@ -87,14 +88,14 @@ def _clip(work, name, dur, style, items, source=None, link=None):
     out = f"{name}.mp4"
     base = ["-f", "lavfi", "-i",
             f"color=c={_hex(style['background'])}:s={style['width']}x{style['height']}:r={FPS}:d={dur:.3f}"]
-    qr = _qr(work, name, link) if source else None
-    if qr:   # scan to read the story: a white-bordered QR at the bottom right, with a short label above it
+    qr, qpx = _qr(work, name, link) or (None, 0) if source else (None, 0)
+    if qr:   # scan to read the story: a white-bordered QR at the top right, level with the headline, with a short label below it
         lab = work / f"{name}_qrlabel.txt"
         lab.write_bytes(b"Scan to read the story")
         parts.append(f"drawtext=fontfile=reg.ttf:textfile={lab.name}:fontsize=22:fontcolor=white:"
-                     f"x={style["width"] - 70 - QR_PX}:y={style["height"] - 24 - QR_PX - 32}")
+                     f"x={style["width"] - 70 - qpx}+({qpx}-text_w)/2:y={QR_Y + qpx + 10}")
         ffmpeg([*base, "-i", qr, "-filter_complex",
-                f"[0:v]{','.join(parts)}[bg];[bg][1:v]overlay=x=W-w-70:y=H-h-24:format=auto[v]",
+                f"[0:v]{','.join(parts)}[bg];[bg][1:v]overlay=x=W-w-70:y={QR_Y}:format=auto[v]",
                 "-map", "[v]", *V_ENC, "-an", out], cwd=work)
     else:
         ffmpeg([*base, "-vf", ",".join(parts), *V_ENC, "-an", out], cwd=work)
@@ -137,13 +138,13 @@ def render_episode(channel, script, audio_files, work, out_path):
     ])
     for i, (seg, mp3) in enumerate(zip(script["segments"], audio_files)):
         dur = duration(work / mp3) + PAD
-        head_lines = len(_wrap(seg["headline"], 34))
-        items = [{"text": seg["headline"], "size": 54, "y": 90, "bold": True, "width": 34}]
+        head_lines = len(_wrap(seg["headline"], 26))
+        items = [{"text": seg["headline"], "size": 54, "y": 90, "bold": True, "width": 26}]
         y = 90 + head_lines * _lh(54) + 40  # stack bullets below however many lines the headline uses
         for j, b in enumerate(seg["bullets"]):
-            n = len(textwrap.wrap("\u2022 " + clean_text(b), 42))
+            n = len(textwrap.wrap("\u2022 " + clean_text(b), 36))
             items.append({"text": "\u2022 " + b, "size": 38, "y": y,
-                          "start": 1.5 + j * 2.0, "width": 42})
+                          "start": 1.5 + j * 2.0, "width": 36})
             y += n * _lh(38) + 26
         add(f"seg{i}", dur, items, source=seg["source"], mp3=mp3, link=seg.get("link"))
         log("render", f"segment {i + 1}/{len(script['segments'])}: {dur:.1f}s")

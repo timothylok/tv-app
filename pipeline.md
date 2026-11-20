@@ -55,7 +55,7 @@ A fresh Ubuntu machine each time, so memory between runs lives in the bucket.
    planned but not built: if edge-tts is blocked on a runner, the run fails.
 7. **Render** (`render.py`): ffmpeg draws text cards on a plain animated background (no logos, no
    stock images): intro, one card per segment (headline, bullets that appear one by one, a
-   "Source: ..." line and a QR code at the bottom right that links to that story's own page, made with `segno`; no QR if it fails), outro. Audio is normalised to about -16 LUFS. Output: H.264 High 720p,
+   "Source: ..." line and a QR code at the top right, level with the headline, with a "Scan to read the story" label under it that links to that story's own page, made with `segno`; no QR if it fails), outro. Audio is normalised to about -16 LUFS. Output: H.264 High 720p,
    AAC, `+faststart` (index at the front so streaming starts at once). About 4 minutes, 8 to 10 MB.
    One `drawtext` per wrapped line, because this ffmpeg build draws a newline as a box.
 8. **Publish** (`publish.py`): uploads the MP4 first, then appends the episode to
