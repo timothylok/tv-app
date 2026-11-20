@@ -11,11 +11,12 @@ Working end to end in the cloud, with no dependence on the user's PC:
 - Repo: https://github.com/timothylok/tv-app (public), branch `main`. Public bucket URL: `https://pub-31476484de9245329a3f35502c44e692.r2.dev` (r2.dev dev URL: MVP only, move to a custom domain, e.g. a subdomain of fittertrack.com, before a Play release).
 - Verified on 2026-11-18: three GitHub runs passed (one started by the Worker cron: dispatch HTTP 204), an episode built on GitHub played on the Google TV, the Workers AI guard ledger reached the bucket with exact neuron figures.
 
-## Latest (2026-11-20, commits up to cb237a3)
+## Latest (2026-11-20, commits up to 2b06c5d)
 
 - **In the video:** each story card has a QR code (top right, level with the headline, label "Scan to read the story" under it) linking to that story's page (`segno`, fail-soft). Verified by decoding frames of the real cloud episode `20261120-0400`; never scanned with a phone from a TV yet. Headline wraps at 26 chars and bullets at 36 so text stays clear of the QR.
 - **App:** idle clock (black screen, NZ time, new random spot every minute, after 5 min with no key and no video; any key wakes). Week > day > AM/PM episode browser, top-line auto-hide setting, NZ-time episode names, home menu / on-demand / live. 30-day retention; episode titles are the first two headlines (older items keep the generic title, hidden in the app).
 - **Episode length:** the model writes only ~55-60% of the words it is asked for (2pm 20 Nov: 426 of 675 words, 192 s; manual run: 650 words, 266 s by luck). `ASK_FACTOR = 1.7` in `script.py` (commit 4aafce7) asks for more; unproven. The `script` audit event in `logs/ai/<date>.jsonl` shows `asked_words`, `target_words`, `words_per_try`, `chosen_words`.
+- **End menu:** "Play next episode" means the one made after the episode just watched; when the newest just ended, the menu offers "Play earlier episode (time)" instead (2b06c5d; checked on the Google TV; the case with a newer episode is not checked on a device).
 - **Pending check:** a one-shot reminder was set for 8:37am NZ 21 Nov (session-only) to verify the 8am episode: run success, length vs 4 min, `script` event, QR position. If the session closed, do this by hand.
 - **AI allowance:** account-wide use was ~96% on 19-20 Nov (stop line 0.95, shared with voice-ecosystem); the 2pm 20 Nov run was not blocked. Watch for skipped runs.
 - GitHub Actions runs take 10-22 min end to end (apt-get ffmpeg install is the slow part). Runs can be read via the unauthenticated GitHub API (public repo); starting one needs the user (browser is signed out, `gh` not authenticated).
