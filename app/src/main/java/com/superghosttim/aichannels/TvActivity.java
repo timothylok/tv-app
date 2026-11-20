@@ -90,6 +90,11 @@ public class TvActivity extends Activity {
     private String homeNotice = "";
     private boolean keepOn = false;
     private boolean topBarShown = false;
+    private static final long IDLE_MS = 5 * 60 * 1000;   // no key for this long, and nothing playing: show the clock
+    private long lastKeyAt = android.os.SystemClock.elapsedRealtime(), idleMovedAt = 0;
+    private final java.util.Random random = new java.util.Random();
+    private FrameLayout idleView;
+    private TextView idleClock;
     // Settings: how long the top line stays up after a key press (seconds; 0 = never show, -1 = always on).
     private static final int[] TOPBAR_CHOICES = {0, 5, 10, 30, 60, -1};
     private static final int TOPBAR_DEFAULT = 10;
@@ -108,6 +113,7 @@ public class TvActivity extends Activity {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             try { sync(); } catch (RuntimeException e) { Log.w(TAG, "sync failed: " + e); }
+            try { idleCheck(); } catch (RuntimeException e) { Log.w(TAG, "idle check failed: " + e); }
             main.postDelayed(this, TICK_MS);
         }
     };
@@ -144,6 +150,8 @@ public class TvActivity extends Activity {
     @Override protected void onStart() {
         super.onStart();
         started = true;
+        lastKeyAt = android.os.SystemClock.elapsedRealtime();   // coming back to the app is activity
+        idleView.setVisibility(View.GONE);
         main.removeCallbacks(tick);
         main.post(tick);
         if (mode == Mode.VOD && vodItem != null && panelKind.isEmpty()) showPaused();   // back from the Home key
@@ -283,6 +291,16 @@ public class TvActivity extends Activity {
             playEpisode(c, watch.resumeAt(c.id));
         });
         root.addView(list, new FrameLayout.LayoutParams(width() / 2, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START));
+
+        idleView = new FrameLayout(this);   // idle screen saver: a clock on black, drawn above everything
+        idleView.setBackgroundColor(Color.BLACK);
+        idleClock = new TextView(this);
+        idleClock.setTextColor(0xFFB8B8B8);
+        idleClock.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(0.14f));
+        idleClock.setTypeface(Typeface.DEFAULT_BOLD);
+        idleView.addView(idleClock, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
+        idleView.setVisibility(View.GONE);
+        root.addView(idleView, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
     }
@@ -949,8 +967,36 @@ public class TvActivity extends Activity {
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent e) {
+        lastKeyAt = android.os.SystemClock.elapsedRealtime();
+        if (idleView.getVisibility() == View.VISIBLE) {   // any key wakes the screen; the key itself is not acted on
+            if (e.getAction() == KeyEvent.ACTION_UP) idleView.setVisibility(View.GONE);
+            return true;
+        }
         if (e.getAction() == KeyEvent.ACTION_DOWN) showTopBar();
         return super.dispatchKeyEvent(e);
+    }
+
+    /**
+     * After 5 minutes without a key press, and while no video is playing, show the time on a black screen at a
+     * random spot that moves every minute (nothing static is left on the TV). Any key goes back to where you were.
+     */
+    private void idleCheck() {
+        long t = android.os.SystemClock.elapsedRealtime();
+        if (idleView.getVisibility() != View.VISIBLE) {
+            if (t - lastKeyAt < IDLE_MS || player == null || player.isPlaying()) return;
+            idleView.setVisibility(View.VISIBLE);
+            idleMovedAt = 0;
+            Log.i(TAG, "idle: showing the clock");
+        }
+        idleClock.setText(StatusFormat.clockNz(System.currentTimeMillis()));
+        if (t - idleMovedAt >= 60_000 || idleMovedAt == 0) {
+            idleMovedAt = t;
+            idleClock.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+            int maxX = Math.max(1, width() - idleClock.getMeasuredWidth());
+            int maxY = Math.max(1, getResources().getDisplayMetrics().heightPixels - idleClock.getMeasuredHeight());
+            idleClock.setTranslationX(random.nextInt(maxX));
+            idleClock.setTranslationY(random.nextInt(maxY));
+        }
     }
 
     private void updateTopBar(ScheduleModel s, long now, long wall) {

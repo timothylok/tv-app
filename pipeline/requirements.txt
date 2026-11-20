@@ -3,3 +3,4 @@ pyyaml
 requests
 edge-tts
 boto3
+segno

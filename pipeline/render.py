@@ -7,6 +7,7 @@ from pathlib import Path
 from common import clean_text, duration, ffmpeg, log
 
 FPS = 25
+QR_PX = 240   # about this many pixels square on the 1280x720 card (big enough to scan from a sofa)
 PAD = 0.8  # seconds of breathing room after each narrated segment
 FONTS = [
     ("C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/arial.ttf"),
@@ -38,7 +39,25 @@ def _hex(c):
     return "0x" + c.lstrip("#")
 
 
-def _clip(work, name, dur, style, items, source=None):
+def _qr(work, name, link):
+    """PNG of a QR code for `link` (the story's own page), or None. Fail-soft: a missing library or a
+    bad link only means no QR on that card; it never stops an episode."""
+    if not link or not link.startswith(("https://", "http://")) or len(link) > 400:
+        return None
+    try:
+        import segno
+        code = segno.make(link, error="l", micro=False)
+        modules = code.symbol_size(scale=1, border=0)[0]
+        scale = max(2, QR_PX // (modules + 6))
+        out = f"{name}_qr.png"
+        code.save(str(work / out), kind="png", scale=scale, border=3, dark="black", light="white")
+        return out
+    except Exception as e:   # noqa: BLE001
+        log("render", f"WARNING no QR for {name}: {e}")
+        return None
+
+
+def _clip(work, name, dur, style, items, source=None, link=None):
     """Render one silent clip. items: dicts with text,size,x,y,start,bold,color,width."""
     parts = [
         f"drawbox=x=0:y=0:w={style['width']}:h=8:color={_hex(style['accent'])}:t=fill",
@@ -66,9 +85,19 @@ def _clip(work, name, dur, style, items, source=None):
         parts.append(f"drawtext=fontfile=reg.ttf:textfile={sf.name}:fontsize=28:"
                      "fontcolor=white:x=100:y=640")
     out = f"{name}.mp4"
-    ffmpeg(["-f", "lavfi", "-i",
-            f"color=c={_hex(style['background'])}:s={style['width']}x{style['height']}:r={FPS}:d={dur:.3f}",
-            "-vf", ",".join(parts), *V_ENC, "-an", out], cwd=work)
+    base = ["-f", "lavfi", "-i",
+            f"color=c={_hex(style['background'])}:s={style['width']}x{style['height']}:r={FPS}:d={dur:.3f}"]
+    qr = _qr(work, name, link) if source else None
+    if qr:   # scan to read the story: a white-bordered QR at the bottom right, with a short label above it
+        lab = work / f"{name}_qrlabel.txt"
+        lab.write_bytes(b"Scan to read the story")
+        parts.append(f"drawtext=fontfile=reg.ttf:textfile={lab.name}:fontsize=22:fontcolor=white:"
+                     f"x={style["width"] - 70 - QR_PX}:y={style["height"] - 24 - QR_PX - 32}")
+        ffmpeg([*base, "-i", qr, "-filter_complex",
+                f"[0:v]{','.join(parts)}[bg];[bg][1:v]overlay=x=W-w-70:y=H-h-24:format=auto[v]",
+                "-map", "[v]", *V_ENC, "-an", out], cwd=work)
+    else:
+        ffmpeg([*base, "-vf", ",".join(parts), *V_ENC, "-an", out], cwd=work)
     return out
 
 
@@ -96,8 +125,8 @@ def render_episode(channel, script, audio_files, work, out_path):
 
     clips, wavs = [], []
 
-    def add(name, dur, items, source=None, mp3=None):
-        clips.append(_clip(work, name, dur, style, items, source))
+    def add(name, dur, items, source=None, mp3=None, link=None):
+        clips.append(_clip(work, name, dur, style, items, source, link))
         wavs.append(_wav(work, name, dur, mp3))
 
     add("intro", 4.0, [
@@ -112,11 +141,11 @@ def render_episode(channel, script, audio_files, work, out_path):
         items = [{"text": seg["headline"], "size": 54, "y": 90, "bold": True, "width": 34}]
         y = 90 + head_lines * _lh(54) + 40  # stack bullets below however many lines the headline uses
         for j, b in enumerate(seg["bullets"]):
-            n = len(textwrap.wrap("\u2022 " + clean_text(b), 50))
+            n = len(textwrap.wrap("\u2022 " + clean_text(b), 42))
             items.append({"text": "\u2022 " + b, "size": 38, "y": y,
-                          "start": 1.5 + j * 2.0, "width": 50})
+                          "start": 1.5 + j * 2.0, "width": 42})
             y += n * _lh(38) + 26
-        add(f"seg{i}", dur, items, source=seg["source"], mp3=mp3)
+        add(f"seg{i}", dur, items, source=seg["source"], mp3=mp3, link=seg.get("link"))
         log("render", f"segment {i + 1}/{len(script['segments'])}: {dur:.1f}s")
     add("outro", 4.0, [
         {"text": "Thanks for watching", "size": 64, "y": 260, "bold": True, "width": 30},

@@ -162,6 +162,7 @@ public class ModelTest {
         assertEquals("Yesterday 2:21 pm", StatusFormat.day(t, t + 24 * 3600_000L));
         assertEquals("19 Nov 2:21 pm", StatusFormat.day(t, t + 48 * 3600_000L));
         assertEquals("2 min", StatusFormat.minutes(146_000));
+        assertEquals("2:21 pm", StatusFormat.clockNz(1795051289000L));
         assertEquals("", StatusFormat.cleanTitle("AI News Update"));
         assertEquals("", StatusFormat.cleanTitle(null));
         assertEquals("Anthropic Goes Public · Gemini Uses Mac", StatusFormat.cleanTitle(" Anthropic Goes Public · Gemini Uses Mac "));

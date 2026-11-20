@@ -42,6 +42,13 @@ public final class StatusFormat {
         return dm.format(new Date(epochMs)) + " " + time;
     }
 
+    /** "11:42 am" in New Zealand time, for the idle clock. */
+    public static String clockNz(long epochMs) {
+        SimpleDateFormat f = new SimpleDateFormat("h:mm a", Locale.ENGLISH);
+        f.setTimeZone(TimeZone.getTimeZone("Pacific/Auckland"));
+        return f.format(new Date(epochMs)).replace("AM", "am").replace("PM", "pm");
+    }
+
     /** The episode's own title, or "" when it is blank or the old generic "AI News Update". */
     public static String cleanTitle(String t) {
         if (t == null) return "";
