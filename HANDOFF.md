@@ -13,12 +13,13 @@ Working end to end in the cloud, with no dependence on the user's PC:
 
 ## Latest (2026-11-20, commits up to 2b06c5d)
 
-- **In the video:** each story card has a QR code (top right, level with the headline, label "Scan to read the story" under it) linking to that story's page (`segno`, fail-soft). Verified by decoding frames of the real cloud episode `20261120-0400`; never scanned with a phone from a TV yet. Headline wraps at 26 chars and bullets at 36 so text stays clear of the QR.
+- **In the video:** each story card has a QR code (top right, level with the headline, label "Scan to read the story" under it) linking to that story's page (`segno`, fail-soft). Verified by decoding frames of the real cloud episode `20261120-0400`; scanned with a phone from the TV on 2026-11-21 and it worked (user report). Headline wraps at 26 chars and bullets at 36 so text stays clear of the QR.
 - **App:** idle clock (black screen, NZ time, new random spot every minute, after 5 min with no key and no video; any key wakes). Week > day > AM/PM episode browser, top-line auto-hide setting, NZ-time episode names, home menu / on-demand / live. 30-day retention; episode titles are the first two headlines (older items keep the generic title, hidden in the app).
 - **Episode length:** the model writes only ~55-60% of the words it is asked for (2pm 20 Nov: 426 of 675 words, 192 s; manual run: 650 words, 266 s by luck). `ASK_FACTOR = 1.7` in `script.py` (commit 4aafce7) asks for more; unproven. The `script` audit event in `logs/ai/<date>.jsonl` shows `asked_words`, `target_words`, `words_per_try`, `chosen_words`.
 - **End menu:** "Play next episode" means the one made after the episode just watched; when the newest just ended, the menu offers "Play earlier episode (time)" instead (2b06c5d; checked on the Google TV; the case with a newer episode is not checked on a device).
-- **Pending check:** a one-shot reminder was set for 8:37am NZ 21 Nov (session-only) to verify the 8am episode: run success, length vs 4 min, `script` event, QR position. If the session closed, do this by hand.
-- **AI allowance:** account-wide use was ~96% on 19-20 Nov (stop line 0.95, shared with voice-ecosystem); the 2pm 20 Nov run was not blocked. Watch for skipped runs.
+- **Health pass (2026-11-21):** last six GitHub runs all succeeded (ai-news and housekeeping). 8am NZ 21 Nov episode `20261120-1905` published on time, 281.8 s (about 4:42; previous two 192 s and 266 s), so ASK_FACTOR 1.7 looks good (3 episodes only). Not checked: `script` audit event (bucket log), QR position in that episode.
+- **AI allowance (2026-11-21):** our ledger 1,729 neurons rolling 24 h (17%), but Cloudflare account-wide rolling 24 h was 4,859 (48.6%; stop line 7,000, shared with voice-ecosystem), so the guard uses the higher figure. Plain `reconcile.py`: Cloudflare 1,744 vs ledger 1,729 today (UTC). R2 storage 91 MB / 26 objects.
+- **Reconcile probe (2026-11-21):** AI half matched exactly (2.46 neurons, 1 call, both sides). R2 half inconclusive: Cloudflare R2 analytics had not caught up in 8 min (deltas +0); run again later. Use `..\.venv\Scripts\python`, the system Python lacks requests/yaml.
 - GitHub Actions runs take 10-22 min end to end (apt-get ffmpeg install is the slow part). Runs can be read via the unauthenticated GitHub API (public repo); starting one needs the user (browser is signed out, `gh` not authenticated).
 
 ## Added earlier (verify before relying on it)
@@ -37,9 +38,9 @@ Working end to end in the cloud, with no dependence on the user's PC:
 1. Add GitHub Actions secret `CLOUDFLARE_ANALYTICS_TOKEN` (the user does this: value is in `.env`).
 2. Deploy the Worker (`cd worker && npx wrangler deploy`) so the housekeeping cron exists (wrangler is logged in via OAuth on this machine).
 3. Run `python pipeline/housekeeping.py --dry-run`, then the real one; run the `housekeeping` workflow once from the Actions tab; check `logs/` in the bucket.
-4. Check the reconcile probe result (`python pipeline/reconcile.py --probe`); until it agrees, the "ledger matches Cloudflare" claim is unproven. The first plain `reconcile.py` report showed the ledger below Cloudflare (890 vs 280 neurons today) because calls before the guard, and dev-machine runs, were never in the bucket ledger.
+4. Re-run the reconcile probe (`reconcile.py --probe`; AI agreed 2026-11-21, R2 analytics lagged, inconclusive); until R2 agrees, the "ledger matches Cloudflare" claim is unproven. The first plain `reconcile.py` report showed the ledger below Cloudflare (890 vs 280 neurons today) because calls before the guard, and dev-machine runs, were never in the bucket ledger.
 5. Piper fallback voice (edge-tts may be blocked from a runner some day; today it works on GitHub).
-6. Episode length: check the 21 Nov 8am run against the 4 min target (ASK_FACTOR 1.7 just added).
+6. Episode length: 21 Nov 8am run was 4:42, fine; keep watching, and read its `script` event.
 7. Test on the Android 10 box (192.168.3.79:5555) when it is connected.
 
 ## Open items and assumptions
