@@ -1,6 +1,7 @@
 """Step 3: narration -> audio files. Provider is a config switch (edge | piper)."""
 import asyncio
-import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from common import log, run
@@ -33,11 +34,26 @@ def _edge(cfg, text, out_path):
 
 
 def _piper(cfg, text, out_path):
-    exe = shutil.which("piper")
-    model = cfg.get("piper_model")
-    if not exe or not model:
-        raise RuntimeError("piper not installed or tts.piper_model not set")
-    p = __import__("subprocess").run([exe, "--model", model, "--output_file", str(out_path)],
-                                     input=text, text=True, capture_output=True)
-    if p.returncode != 0:
-        raise RuntimeError(p.stderr[-300:])
+    """CPU-only fallback voice (pip package piper-tts). The voice model is fetched on first use,
+    so a normal edge-tts run never downloads it. Output is converted to a real mp3."""
+    voice = cfg.get("piper_voice", "en_GB-alan-medium")
+    cache = Path(cfg.get("piper_dir") or Path(__file__).resolve().parent.parent / "out" / "piper")
+    cache.mkdir(parents=True, exist_ok=True)
+    if not (cache / f"{voice}.onnx").is_file():
+        p = subprocess.run([sys.executable, "-m", "piper.download_voices", voice, "--download-dir", str(cache)],
+                           capture_output=True, text=True, timeout=600)
+        if p.returncode != 0:
+            raise RuntimeError("piper voice download failed: " + p.stderr[-300:])
+    wav = Path(out_path).with_suffix(".piper.wav")
+    p = subprocess.run([sys.executable, "-m", "piper", "-m", voice, "--data-dir", str(cache),
+                        "-f", str(wav)], input=text, text=True, encoding="utf-8",
+                       capture_output=True, timeout=600)
+    if p.returncode != 0 or not wav.is_file():
+        raise RuntimeError("piper failed: " + p.stderr[-300:])
+    try:
+        run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav), "-codec:a", "libmp3lame",
+             "-q:a", "4", str(out_path)])
+    finally:
+        wav.unlink(missing_ok=True)
+    if not Path(out_path).is_file() or Path(out_path).stat().st_size < 1000:
+        raise RuntimeError("piper produced no audio")

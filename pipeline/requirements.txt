@@ -2,5 +2,6 @@ feedparser
 pyyaml
 requests
 edge-tts
+piper-tts
 boto3
 segno

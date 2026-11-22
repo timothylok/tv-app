@@ -22,6 +22,14 @@ Working end to end in the cloud, with no dependence on the user's PC:
 - **Reconcile probe (2026-11-21):** AI half matched exactly (2.46 neurons, 1 call, both sides). R2 half inconclusive: Cloudflare R2 analytics had not caught up in 8 min (deltas +0); run again later. Use `..\.venv\Scripts\python`, the system Python lacks requests/yaml.
 - GitHub Actions runs take 10-22 min end to end (apt-get ffmpeg install is the slow part). Runs can be read via the unauthenticated GitHub API (public repo); starting one needs the user (browser is signed out, `gh` not authenticated).
 
+## Session 2026-11-23
+
+- Worker redeployed: both crons live (`0 19,1 * * *` and `30 11 * * *`). `housekeeping.py` dry run and real run done locally: nothing to delete (R2 145 MB, 1.4%). The **housekeeping workflow has not been run on GitHub** (gh logged out; dispatching with the .env token was blocked): the user runs it from the Actions tab, then checks `logs/` in the bucket.
+- **Piper fallback built** (`tts.py`, `piper-tts` in requirements): tested locally with edge forced to fail (valid mp3). Not yet seen on a GitHub runner; a full episode through the fallback was not rendered.
+- Reconcile probe re-run: inconclusive again (analytics 0 after 8 min, AI half too). Try again later.
+- `script` events 21-22 Nov: asked 1147 words, got 700-1350. Durations 337, 351, 374, 297 s: **374 s exceeded the 6 min ceiling** (ceiling not enforced in seconds); watch it.
+- Google TV now at 192.168.3.110:2025 (Google_TV, API 34). App built and installed (unchanged since 20 Nov) but **not launched**: karaoke was in the foreground. Still to check on it: end menu with a newer episode, network loss, QR in a cloud episode.
+
 ## Added earlier (verify before relying on it)
 
 - **Workers AI guard** (`usage.py`): rolling 24 h ledger from `usage.neurons`, stops at `stop_at` 0.9 of 10,000 (yaml `daily_neuron_budget`, `stop_at`). It also takes Cloudflare's own account-wide figure when `CLOUDFLARE_ANALYTICS_TOKEN` is set (confirmed working on the GitHub runner 2026-11-19). `D:\AI\voice-ecosystem` (active) shares the allowance (about 3,000 neurons a day, peak 5,100; see memory `shared-cloudflare-ai-account`). It was 0.7 for a day, but account-wide use hit 7,300 on 2026-11-18 and would have skipped episodes, so it is 0.9 now; at the top, voice-ecosystem is the one that would run out. Housekeeping logs the account-wide figure and warns at 70%.
@@ -35,13 +43,12 @@ Working end to end in the cloud, with no dependence on the user's PC:
 
 ## Do next (in this order)
 
-1. Add GitHub Actions secret `CLOUDFLARE_ANALYTICS_TOKEN` (the user does this: value is in `.env`).
-2. Deploy the Worker (`cd worker && npx wrangler deploy`) so the housekeeping cron exists (wrangler is logged in via OAuth on this machine).
-3. Run `python pipeline/housekeeping.py --dry-run`, then the real one; run the `housekeeping` workflow once from the Actions tab; check `logs/` in the bucket.
+1. (Done) `CLOUDFLARE_ANALYTICS_TOKEN` secret added. 2. (Done) Worker deployed.
+3. Run the `housekeeping` workflow once from the Actions tab (user); check `logs/` in the bucket. Local runs are done.
 4. Re-run the reconcile probe (`reconcile.py --probe`; AI agreed 2026-11-21, R2 analytics lagged, inconclusive); until R2 agrees, the "ledger matches Cloudflare" claim is unproven. The first plain `reconcile.py` report showed the ledger below Cloudflare (890 vs 280 neurons today) because calls before the guard, and dev-machine runs, were never in the bucket ledger.
-5. Piper fallback voice (edge-tts may be blocked from a runner some day; today it works on GitHub).
-6. Episode length: 21 Nov 8am run was 4:42, fine; keep watching, and read its `script` event.
-7. Test on the Android 10 box (192.168.3.79:5555) when it is connected.
+5. Confirm the Piper fallback on a GitHub runner (e.g. a temporary `provider: piper` run, then revert).
+6. Episode length: enforce the 6 min ceiling in seconds (374 s seen); keep watching.
+7. Launch and check the app on the Google TV when karaoke is not in use (the user chose it over the Android 10 box; the Android 10 box stays unchecked).
 
 ## Open items and assumptions
 

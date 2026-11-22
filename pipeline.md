@@ -51,8 +51,9 @@ A fresh Ubuntu machine each time, so memory between runs lives in the bucket.
    speculation and invented facts; the source credit comes from the feed, never from the model.
    Up to 3 attempts, keeping the best. A local Ollama model (`provider: ollama`) is the fallback
    for development.
-6. **Voice** (`tts.py`): edge-tts speaks each segment's narration to an MP3. A Piper fallback is
-   planned but not built: if edge-tts is blocked on a runner, the run fails.
+6. **Voice** (`tts.py`): edge-tts speaks each segment's narration to an MP3. If it fails, the
+   Piper fallback (`piper-tts` pip package, CPU only, voice `en_GB-alan-medium` downloaded on first
+   use into `out/piper`, output converted to mp3) takes over. Tested locally; not yet on a GitHub runner.
 7. **Render** (`render.py`): ffmpeg draws text cards on a plain animated background (no logos, no
    stock images): intro, one card per segment (headline, bullets that appear one by one, a
    "Source: ..." line and a QR code at the top right, level with the headline, with a "Scan to read the story" label under it that links to that story's own page, made with `segno`; no QR if it fails), outro. Audio is normalised to about -16 LUFS. Output: H.264 High 720p,
@@ -186,7 +187,7 @@ Never commit `.env`; never put a token in chat or in a log.
 
 ## 11. Known gaps
 
-- No Piper fallback voice yet.
+- Piper fallback is untested on the GitHub runner (needs piper-tts wheel and ffmpeg libmp3lame there). `piper-tts` is GPL-3 licensed; it is only a CI tool, but weigh that before a Play release.
 - Episode length varies (about 3.5 to 6 min, 4 min on average): the model writes only about 55-60% of the words it is asked for, so `script.py` asks for 1.7 times the target (`ASK_FACTOR`); the script picks the closest of 3 tries and trims to a hard 6 min ceiling.
 - The Android 10 (API 29) box has not been tested.
 - Dev-machine runs record to a local ledger only; the guard still sees that spend through
