@@ -28,7 +28,16 @@ Working end to end in the cloud, with no dependence on the user's PC:
 - **Piper fallback built** (`tts.py`, `piper-tts` in requirements): tested locally with edge forced to fail (valid mp3). Not yet seen on a GitHub runner; a full episode through the fallback was not rendered.
 - Reconcile probe re-run: inconclusive again (analytics 0 after 8 min, AI half too). Try again later.
 - `script` events 21-22 Nov: asked 1147 words, got 700-1350. Durations 337, 351, 374, 297 s: **374 s exceeded the 6 min ceiling** (ceiling not enforced in seconds); watch it.
-- Google TV now at 192.168.3.110:2025 (Google_TV, API 34). App built and installed (unchanged since 20 Nov) but **not launched**: karaoke was in the foreground. Still to check on it: end menu with a newer episode, network loss, QR in a cloud episode.
+- **Google TV checked (2026-11-23):** Google_TV at 192.168.3.110:2025 (API 34; address changes, use `adb mdns services`). App (unchanged since 20 Nov) installed and launched after karaoke finished. Home menu OK (Play latest episode, All episodes, top-line setting); OK on "Play latest" played the cloud episode `20261122-1902` ("AI Music Removed · Vibe Coding"), progress bar running, audio focus held, no FATAL/ANR in logcat. The `Bluetooth audio disconnected` media-session error belongs to `com.android.bluetooth`, not the app; `buffer descriptor with invalid usage bits` warnings look like decoder noise (unconfirmed). The top line showed 56% free AI, matching Cloudflare's account-wide 43.7% used.
+- **QR in a cloud episode verified on screen:** top right, "Scan to read the story" under it, "Source: The Verge" line at the bottom, text clear of the QR (screenshot from the TV; the QR was not scanned this time, the 21 Nov phone scan worked).
+- Still not checked on a device: end menu with a newer episode, network loss, multi-hour soak, Android 10 box.
+
+## Health pass 2026-11-25 (public reads only)
+
+- **Housekeeping workflow confirmed in the cloud:** the second Worker cron started it on 23 and 24 Nov (11:30 UTC), both succeeded; daily-summary events reach `logs/ai/` (so item 3 is done, and the cloud use of `CLOUDFLARE_ANALYTICS_TOKEN` works: Cloudflare 24 h figure present, 34% on 23 Nov).
+- **One failed ai-news run:** 2026-11-23 01:00 UTC (2pm NZ), the `Run python pipeline/run.py` step failed after about 7 min; no events for it in the bucket logs, so it died before the first logged AI call (cause unknown: the run log needs a signed-in GitHub). The next runs (23 Nov 19:00, 24 Nov 01:00 and 19:00, 25 Nov 01:00 UTC) all succeeded; that slot has no episode. Ask the user to read the log in the Actions tab if it recurs.
+- Latest episodes (s): 287, 316, 256, 300 (all under 6 min); newest `20261125-0104`.
+- **Health pass added to `housekeeping.py` (uncommitted until the user says so):** `check_health` + `recent_runs`, see `pipeline.md` section 6. It runs with the daily housekeeping (11:30 UTC, 00:30 NZ). Problems exit 1 so GitHub emails the owner; recovered failures and episodes over 360 s only warn. Tested: scratch unit checks (8 cases) and a `--dry-run` against live data (0 problems, 0 warnings). Not yet seen in a real workflow run; confirm the first cron run shows `health: 0 problem(s)` and that GitHub's failed-workflow emails are on.
 
 ## Added earlier (verify before relying on it)
 
@@ -44,11 +53,11 @@ Working end to end in the cloud, with no dependence on the user's PC:
 ## Do next (in this order)
 
 1. (Done) `CLOUDFLARE_ANALYTICS_TOKEN` secret added. 2. (Done) Worker deployed.
-3. Run the `housekeeping` workflow once from the Actions tab (user); check `logs/` in the bucket. Local runs are done.
+3. (Done: cron-started housekeeping workflow ran and succeeded 23 and 24 Nov.)
 4. Re-run the reconcile probe (`reconcile.py --probe`; AI agreed 2026-11-21, R2 analytics lagged, inconclusive); until R2 agrees, the "ledger matches Cloudflare" claim is unproven. The first plain `reconcile.py` report showed the ledger below Cloudflare (890 vs 280 neurons today) because calls before the guard, and dev-machine runs, were never in the bucket ledger.
 5. Confirm the Piper fallback on a GitHub runner (e.g. a temporary `provider: piper` run, then revert).
 6. Episode length: enforce the 6 min ceiling in seconds (374 s seen); keep watching.
-7. Launch and check the app on the Google TV when karaoke is not in use (the user chose it over the Android 10 box; the Android 10 box stays unchecked).
+7. (Done 2026-11-23: launch, playback and QR checked on the Google TV.) Remaining device checks: end menu with a newer episode, network loss, soak; the Android 10 box stays unchecked (user chose the Google TV).
 
 ## Open items and assumptions
 

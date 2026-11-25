@@ -133,6 +133,13 @@ Runs daily at 00:30 NZ. `--dry-run` shows what it would delete and changes nothi
    upload in progress is safe). Unknown channels and the filler are left alone.
 3. Measures storage and the month's operations; writes `daily-summary` lines to both logs.
 4. Prints a GitHub warning when anything is over 70% of its free tier.
+5. **Health pass** (`check_health`, last step, never blocks 1-4). Reads each schedule and the latest
+   `ai-news` runs from the public GitHub API (fail soft if unreadable). *Problem* (red annotation,
+   the job exits 1, so GitHub emails the owner): the newest episode started over 20 h ago (normal
+   longest gap is 18 h, 2pm to 8am) or is empty, or the newest finished `ai-news` run failed.
+   *Warning*: a failed run in the last 24 h followed by a success, or an episode over 360 s.
+   Logged as a `health` event in `logs/ai`. The email only fires if GitHub notifications for failed
+   workflow runs are on for the owner's account.
 
 Audit logs are never deleted (a few KB a day).
 
@@ -144,7 +151,7 @@ Audit logs are never deleted (a few KB a day).
 
 | Stream | Events |
 |---|---|
-| `ai` | `call` (model, neurons, exact, used_24h), `blocked`, `ledger-low`, `daily-summary` |
+| `ai` | `call` (model, neurons, exact, used_24h), `blocked`, `ledger-low`, `daily-summary`, `health` |
 | `r2` | `op` (op, class, key, bytes), `blocked`, `housekeeping-delete`, `month-counters`, `daily-summary` |
 
 ## 8. Checking against Cloudflare (`reconcile.py`)

@@ -10,9 +10,14 @@
    spend, each against its free tier; write a daily-summary line to logs/r2 and logs/ai.
 4. Warn (GitHub warning annotation) when anything is over 70% of its free tier; the publishing
    runs themselves stop at 80% (r2usage.STOP_AT, usage.DEFAULT_STOP_AT).
+5. Health pass (check_health): the newest episode must be under STALE_HOURS old and the newest
+   ai-news run must not have failed, else the job exits 1 (GitHub emails the owner); a recovered
+   failure or an episode over 6 min is only a warning. Logged as a `health` event in logs/ai.
 The audit logs themselves are kept (a few KB a day); nothing here deletes history.
 """
 import argparse
+import calendar
+import os
 import sys
 import time
 
@@ -24,6 +29,8 @@ from publish import KEEP_HOURS, Publisher, prune_items, pull_state, push_state
 
 ORPHAN_MIN_AGE_S = 2 * 3600
 WARN_AT = 0.7
+STALE_HOURS = 20      # episodes come at 8am and 2pm NZ: the longest normal gap is 18 h (2pm -> 8am)
+MAX_EPISODE_S = 360   # the 6 min ceiling
 
 
 def plan_cleanup(objs, schedules, now):
@@ -51,6 +58,64 @@ def plan_cleanup(objs, schedules, now):
         if now - o["LastModified"].timestamp() > ORPHAN_MIN_AGE_S:
             dele.append(k)
     return new, sorted(set(dele))
+
+
+def recent_runs(repo, workflow="ai-news.yml", n=8):
+    """Latest workflow runs from the public GitHub API ([] when it cannot be read: fail soft)."""
+    import requests
+
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "ai-tv-housekeeping"}
+    token = os.environ.get("GITHUB_TOKEN")  # optional: only raises the rate limit
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        r = requests.get(f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs",
+                         params={"per_page": n}, headers=headers, timeout=20)
+        r.raise_for_status()
+        return [{"conclusion": x.get("conclusion"), "status": x.get("status"),
+                 "created": x.get("created_at", "")} for x in r.json().get("workflow_runs", [])]
+    except Exception as e:  # noqa: BLE001 - a health check must never break the housekeeping
+        log("housekeeping", f"could not read GitHub runs: {e}")
+        return []
+
+
+def check_health(schedules, runs, now):
+    """Pure function: returns (problems, warnings) as lists of strings.
+
+    problems (job fails, GitHub emails the owner): no new episode for STALE_HOURS, or the newest
+    finished ai-news run failed. warnings: a failed run in the last 24 h that was followed by a
+    success, or an episode longer than MAX_EPISODE_S.
+    runs: newest first, each {"conclusion", "status", "created"}.
+    """
+    problems, warnings = [], []
+    for cid, sched in schedules.items():
+        items = sched.get("items", [])
+        if not items:
+            problems.append(f"{cid}: schedule is empty")
+            continue
+        newest = max(i.get("start", 0) for i in items) / 1000
+        age_h = (now - newest) / 3600
+        if age_h > STALE_HOURS:
+            problems.append(f"{cid}: newest episode started {age_h:.0f} h ago (limit {STALE_HOURS} h)")
+        for i in items:
+            if i.get("start", 0) / 1000 > now - 24 * 3600 and i.get("duration", 0) > MAX_EPISODE_S:
+                warnings.append(f"{cid}: episode {i.get('id')} is {i['duration']:.0f} s "
+                                f"(over {MAX_EPISODE_S} s)")
+    done = [r for r in runs if r.get("status") == "completed"]
+    if done and done[0].get("conclusion") == "failure":
+        problems.append(f"newest ai-news run failed ({done[0].get('created')})")
+    else:
+        for r in done:
+            if r.get("conclusion") == "failure" and _age_s(r.get("created"), now) < 24 * 3600:
+                warnings.append(f"an ai-news run failed at {r.get('created')} (later runs passed)")
+    return problems, warnings
+
+
+def _age_s(iso, now):
+    try:
+        return now - calendar.timegm(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
+    except (TypeError, ValueError):
+        return 1e12  # unreadable time: treat as old
 
 
 def main(argv=None):
@@ -116,9 +181,20 @@ def main(argv=None):
         if pct > WARN_AT * 100:
             print(f"::warning::{label} is at {pct}% of its free tier")
 
+    # Health pass: after the cleanup and summaries (never skipped), before push_state (so the
+    # event reaches the bucket log). It only sets the exit code; it cannot break the tidy-up.
+    problems, warnings = check_health(schedules, recent_runs(os.environ.get("GITHUB_REPOSITORY",
+                                                                            "timothylok/tv-app")), now)
+    for w in warnings:
+        print(f"::warning::health: {w}")
+    for pr in problems:
+        print(f"::error::health: {pr}")
+    log("housekeeping", f"health: {len(problems)} problem(s), {len(warnings)} warning(s)")
+    auditlog.event("ai", event="health", problems=problems, warnings=warnings)
+
     if not args.dry_run:
         push_state()
-    return 0
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":
